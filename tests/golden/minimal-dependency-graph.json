@@ -1,0 +1,107 @@
+{
+  "analysis": {
+    "complete": true,
+    "namespace_prefixes": [],
+    "python_version": "NORMALIZED",
+    "view": {
+      "kind": "module"
+    }
+  },
+  "dag": {
+    "dependency_first_layers": [
+      [
+        "scc-3e23e8160039"
+      ],
+      [
+        "scc-ca978112ca1b"
+      ]
+    ],
+    "edges": [
+      {
+        "raw_dependencies": [
+          {
+            "source": "a",
+            "target": "b"
+          }
+        ],
+        "source": "scc-ca978112ca1b",
+        "target": "scc-3e23e8160039"
+      }
+    ],
+    "nodes": [
+      {
+        "cyclic": false,
+        "id": "scc-ca978112ca1b",
+        "members": [
+          "a"
+        ]
+      },
+      {
+        "cyclic": false,
+        "id": "scc-3e23e8160039",
+        "members": [
+          "b"
+        ]
+      }
+    ]
+  },
+  "dependencies": [
+    {
+      "evidence": [
+        {
+          "fact_id": "fact-1e4e1e2c5468",
+          "resolution_kind": "exact_module"
+        }
+      ],
+      "source": "a",
+      "target": "b"
+    }
+  ],
+  "diagnostics": [],
+  "external_imports": [],
+  "import_facts": [
+    {
+      "alias_index": 0,
+      "as_name": null,
+      "base_module": "b",
+      "bound_name": "b",
+      "column": 0,
+      "end_column": 8,
+      "end_line": 1,
+      "id": "fact-1e4e1e2c5468",
+      "imported_name": null,
+      "line": 1,
+      "path": "a.py",
+      "relative_level": 0,
+      "scope": "module",
+      "source": "a",
+      "source_segment": "import b",
+      "syntax": "import",
+      "type_only": false
+    }
+  ],
+  "modules": [
+    {
+      "id": "a",
+      "is_package": false,
+      "parent_package": null,
+      "path": "a.py"
+    },
+    {
+      "id": "b",
+      "is_package": false,
+      "parent_package": null,
+      "path": "b.py"
+    }
+  ],
+  "schema_version": "0.1",
+  "semantics": {
+    "dynamic_imports": "diagnosed_not_resolved",
+    "edge_direction": "importer_to_imported",
+    "edge_kind": "syntactic_import",
+    "implicit_parent_package_imports": false,
+    "namespace_packages": "prefixes_known_nodes_not_emitted",
+    "node_kind": "python_module"
+  },
+  "unresolved_imports": []
+}

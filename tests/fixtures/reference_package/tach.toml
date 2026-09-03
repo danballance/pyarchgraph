@@ -1,0 +1,23 @@
+source_roots = ["."]
+
+[[modules]]
+path = "demo"
+
+[[modules]]
+path = "demo.api"
+depends_on = [{ path = "demo.service" }]
+
+[[modules]]
+path = "demo.isolated"
+
+[[modules]]
+path = "demo.model"
+
+[[modules]]
+path = "demo.service"
+depends_on = [{ path = "demo.api" }, { path = "demo.model" }]
+
+[[modules]]
+path = "demo.sub.worker"
+depends_on = [{ path = "demo.service" }]
+

@@ -1,0 +1,265 @@
+from __future__ import annotations
+
+import json
+
+from pyarchgraph.model import (
+    AnalysisResult,
+    Dag,
+    DagEdge,
+    DagNode,
+    DependencyEdge,
+    DependencyEvidence,
+    Diagnostic,
+    ExternalClassification,
+    ExternalImport,
+    ImportFact,
+    ImportScope,
+    ImportSyntax,
+    RawDependency,
+    ResolutionKind,
+    Severity,
+    SourceModule,
+    UnresolvedImport,
+    UnresolvedReason,
+)
+from pyarchgraph.rendering import render_json, render_mermaid_markdown
+
+
+def _result(*, dag: Dag, **overrides: object) -> AnalysisResult:
+    values: dict[str, object] = {
+        "complete": True,
+        "python_version": "3.14.7",
+        "namespace_prefixes": (),
+        "modules": (),
+        "import_facts": (),
+        "dependencies": (),
+        "external_imports": (),
+        "unresolved_imports": (),
+        "dag": dag,
+        "diagnostics": (),
+    }
+    values.update(overrides)
+    return AnalysisResult(**values)  # type: ignore[arg-type]
+
+
+def test_render_json_emits_complete_contract_and_canonical_order() -> None:
+    fact = ImportFact(
+        id="fact-z",
+        source="a",
+        path="a.py",
+        line=2,
+        column=0,
+        end_line=2,
+        end_column=8,
+        alias_index=0,
+        syntax=ImportSyntax.IMPORT,
+        source_segment="import b",
+        base_module="b",
+        imported_name=None,
+        as_name=None,
+        bound_name="b",
+        relative_level=0,
+        scope=ImportScope.MODULE,
+        type_only=False,
+    )
+    dag = Dag(
+        nodes=(
+            DagNode(id="scc-b", members=("b",), cyclic=False),
+            DagNode(id="scc-a", members=("a",), cyclic=False),
+        ),
+        edges=(
+            DagEdge(
+                source="scc-a",
+                target="scc-b",
+                raw_dependencies=(RawDependency(source="a", target="b"),),
+            ),
+        ),
+        dependency_first_layers=(("scc-b",), ("scc-a",)),
+    )
+    result = _result(
+        dag=dag,
+        namespace_prefixes=("zeta", "alpha"),
+        modules=(
+            SourceModule("b", "b.py", False, None),
+            SourceModule("a", "a.py", False, None),
+        ),
+        import_facts=(fact,),
+        dependencies=(
+            DependencyEdge(
+                source="a",
+                target="b",
+                evidence=(DependencyEvidence("fact-z", ResolutionKind.EXACT_MODULE),),
+            ),
+        ),
+        external_imports=(
+            ExternalImport("a", "os", ExternalClassification.STDLIB, ("fact-os",)),
+        ),
+        unresolved_imports=(
+            UnresolvedImport(
+                "a",
+                "a.missing",
+                UnresolvedReason.MISSING_INTERNAL_TARGET,
+                ("fact-missing",),
+            ),
+        ),
+        diagnostics=(
+            Diagnostic(
+                Severity.WARNING,
+                "dynamic_import_ignored",
+                "Dynamic import syntax is outside v0.1.",
+            ),
+        ),
+    )
+
+    rendered = render_json(result)
+    payload = json.loads(rendered)
+
+    assert rendered.endswith("\n") and not rendered.endswith("\n\n")
+    assert render_json(result) == rendered
+    assert payload["schema_version"] == "0.1"
+    assert payload["semantics"] == {
+        "dynamic_imports": "diagnosed_not_resolved",
+        "edge_direction": "importer_to_imported",
+        "edge_kind": "syntactic_import",
+        "implicit_parent_package_imports": False,
+        "namespace_packages": "prefixes_known_nodes_not_emitted",
+        "node_kind": "python_module",
+    }
+    assert payload["analysis"] == {
+        "complete": True,
+        "namespace_prefixes": ["alpha", "zeta"],
+        "python_version": "3.14.7",
+        "view": {"kind": "module"},
+    }
+    assert [module["id"] for module in payload["modules"]] == ["a", "b"]
+    assert payload["import_facts"][0] == {
+        "alias_index": 0,
+        "as_name": None,
+        "base_module": "b",
+        "bound_name": "b",
+        "column": 0,
+        "end_column": 8,
+        "end_line": 2,
+        "id": "fact-z",
+        "imported_name": None,
+        "line": 2,
+        "path": "a.py",
+        "relative_level": 0,
+        "scope": "module",
+        "source": "a",
+        "source_segment": "import b",
+        "syntax": "import",
+        "type_only": False,
+    }
+    assert payload["dependencies"][0]["evidence"] == [
+        {"fact_id": "fact-z", "resolution_kind": "exact_module"}
+    ]
+    assert payload["external_imports"] == [
+        {
+            "classification": "stdlib",
+            "fact_ids": ["fact-os"],
+            "requested": "os",
+            "source": "a",
+        }
+    ]
+    assert payload["unresolved_imports"] == [
+        {
+            "fact_ids": ["fact-missing"],
+            "reason": "missing_internal_target",
+            "requested": "a.missing",
+            "source": "a",
+        }
+    ]
+    assert [node["members"] for node in payload["dag"]["nodes"]] == [
+        ["a"],
+        ["b"],
+    ]
+    assert payload["diagnostics"] == [
+        {
+            "code": "dynamic_import_ignored",
+            "message": "Dynamic import syntax is outside v0.1.",
+            "severity": "warning",
+        }
+    ]
+
+
+def test_mermaid_is_derived_only_from_dag_and_is_deterministic() -> None:
+    dag = Dag(
+        nodes=(
+            DagNode(id="cycle", members=('b"&<\n', "a\\"), cyclic=True),
+            DagNode(id="plain", members=("z",), cyclic=False),
+        ),
+        edges=(
+            DagEdge(
+                source="cycle",
+                target="plain",
+                raw_dependencies=(
+                    RawDependency("b", "z"),
+                    RawDependency("a", "z"),
+                ),
+            ),
+        ),
+        dependency_first_layers=(("plain",), ("cycle",)),
+    )
+    # Non-DAG fields deliberately contain None: the Mermaid renderer must not
+    # inspect them or rebuild SCC/edge semantics.
+    result = _result(
+        dag=dag,
+        modules=None,
+        dependencies=None,
+        import_facts=None,
+        diagnostics=None,
+    )
+
+    expected = """# Python dependency DAG
+
+Generated file.
+
+Legend: `A -> B` means A contains an import statically resolved to B. Cycle nodes are strongly connected components.
+
+```mermaid
+flowchart LR
+    n0001["Cycle (2): a&#92;, b&quot;&amp;&lt;&#10;"]:::cycle
+    n0002["z"]
+    n0001 -->|2 imports| n0002
+    classDef cycle fill:#fff1f2,stroke:#be123c,stroke-width:2px
+```
+"""
+    assert render_mermaid_markdown(result) == expected
+    assert render_mermaid_markdown(result) == expected
+
+
+def test_mermaid_warns_only_above_advisory_threshold_without_truncating() -> None:
+    def dag_with_size(size: int) -> Dag:
+        return Dag(
+            nodes=tuple(
+                DagNode(id=f"scc-{index}", members=(f"m{index:03d}",), cyclic=False)
+                for index in range(size)
+            ),
+            edges=(),
+            dependency_first_layers=(),
+        )
+
+    at_threshold = render_mermaid_markdown(_result(dag=dag_with_size(200)))
+    above_threshold = render_mermaid_markdown(_result(dag=dag_with_size(201)))
+
+    assert "Warning:" not in at_threshold
+    assert "Warning:" in above_threshold
+    assert "201 nodes" in above_threshold
+    assert "package-prefix projection" in above_threshold
+    assert sum('["m' in line for line in above_threshold.splitlines()) == 201
+
+
+def test_single_raw_dependency_has_no_edge_count_label() -> None:
+    dag = Dag(
+        nodes=(
+            DagNode("a", ("a",), False),
+            DagNode("b", ("b",), False),
+        ),
+        edges=(DagEdge("a", "b", (RawDependency("a", "b"),)),),
+        dependency_first_layers=(("b",), ("a",)),
+    )
+
+    rendered = render_mermaid_markdown(_result(dag=dag))
+    assert "n0001 --> n0002" in rendered
+    assert "|1 import" not in rendered
