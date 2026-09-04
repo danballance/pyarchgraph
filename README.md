@@ -2,13 +2,24 @@
 
 ## Install and run
 
-Python 3.11 or newer is required. NetworkX is the sole runtime dependency.
+Python 3.11 or newer is required, except for CPython 3.14.1. That patch release
+contains a `dataclasses` regression that prevents NetworkX from importing; use
+Python 3.14.2 or newer within the 3.14 series. NetworkX is the sole runtime
+dependency.
 
 Run the tool directly from its GitHub repository without cloning or installing
 it into the current project:
 
 ```console
-uvx --from git+https://github.com/danballance/pyarchgraph pyarchgraph SOURCE_ROOT --output-dir build/pyarchgraph
+uvx --python '>=3.11,!=3.14.1' --from git+https://github.com/danballance/pyarchgraph pyarchgraph SOURCE_ROOT --output-dir build/pyarchgraph
+```
+
+The explicit Python constraint prevents `uvx` from selecting CPython 3.14.1
+from an existing installation or tool cache. You can instead request a known
+fixed interpreter exactly:
+
+```console
+uvx --python 3.14.2 --from git+https://github.com/danballance/pyarchgraph pyarchgraph SOURCE_ROOT --output-dir build/pyarchgraph
 ```
 
 For local development from a clone:
