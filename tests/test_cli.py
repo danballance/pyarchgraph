@@ -54,7 +54,9 @@ def test_cli_writes_complete_outputs_without_executing_source(
     assert "4 modules" in capsys.readouterr().err
 
 
-def test_cli_writes_partial_result_and_returns_one(tmp_path: Path) -> None:
+def test_cli_writes_partial_result_returns_one_and_prints_diagnostic(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     source_root = tmp_path / "source"
     output_dir = tmp_path / "out"
     _write(source_root, "good.py", "import os\n")
@@ -67,6 +69,28 @@ def test_cli_writes_partial_result_and_returns_one(tmp_path: Path) -> None:
     assert document["analysis"]["complete"] is False
     assert {item["code"] for item in document["diagnostics"]} == {"source_syntax_error"}
     assert (output_dir / "dependency-dag.md").is_file()
+    assert (
+        "pyarchgraph: broken.py:1:10: error[source_syntax_error]: "
+        "Python source could not be parsed."
+    ) in capsys.readouterr().err
+
+
+def test_cli_prints_diagnostic_without_source_position(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source_root = tmp_path / "package"
+    output_dir = tmp_path / "out"
+    _write(source_root, "__init__.py", "from . import module\n")
+    _write(source_root, "module.py", "VALUE = 1\n")
+
+    status = main([str(source_root), "--output-dir", str(output_dir)])
+
+    assert status == 1
+    assert (
+        "pyarchgraph: __init__.py: error[root_init_unsupported]: "
+        "A source-root-level __init__.py is unsupported; pass its parent "
+        "directory as the source root."
+    ) in capsys.readouterr().err
 
 
 def test_cli_invalid_input_exits_two_without_outputs(tmp_path: Path) -> None:

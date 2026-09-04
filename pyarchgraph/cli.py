@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from pyarchgraph.analysis import analyse
+from pyarchgraph.model import Diagnostic
 from pyarchgraph.rendering import render_json, render_mermaid_markdown
 
 
@@ -41,6 +42,22 @@ def _parser() -> argparse.ArgumentParser:
         help="exclude a POSIX-relative file or directory glob; may be repeated",
     )
     return parser
+
+
+def _format_diagnostic(diagnostic: Diagnostic) -> str:
+    location = diagnostic.path
+    if location is not None and diagnostic.line is not None:
+        location = f"{location}:{diagnostic.line}"
+    if location is not None and diagnostic.column is not None:
+        location = f"{location}:{diagnostic.column + 1}"
+
+    prefix = "pyarchgraph"
+    if location is not None:
+        prefix = f"{prefix}: {location}"
+    return (
+        f"{prefix}: {diagnostic.severity.value}[{diagnostic.code}]: "
+        f"{diagnostic.message}"
+    )
 
 
 def _stage_write(path: Path, content: str) -> Path:
@@ -122,6 +139,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"pyarchgraph: {exc}", file=sys.stderr)
         return 2
+
+    for diagnostic in result.diagnostics:
+        print(_format_diagnostic(diagnostic), file=sys.stderr)
 
     cyclic_count = sum(node.cyclic for node in result.dag.nodes)
     print(
