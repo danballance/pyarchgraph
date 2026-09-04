@@ -23,7 +23,17 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pyarchgraph"]
+packages = ["pyarchgraph"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/pyarchgraph",
+  "/tests",
+  "/docs",
+  "/README.md",
+  "/python_dependency_dag_poc_plan.md",
+  "/pyproject.toml",
+]
 
 [tool.pytest.ini_options]
 addopts = "-ra"
