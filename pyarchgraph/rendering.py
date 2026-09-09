@@ -13,6 +13,26 @@ from pyarchgraph.model import AnalysisResult, Dag, Diagnostic, ImportFact, View
 MERMAID_NODE_WARNING_THRESHOLD = 200
 
 
+class ImpliedEdges(str, Enum):
+    """How to draw an edge that a longer path already implies.
+
+    The transitive reduction is reachability-preserving but weight-blind: it
+    drops an edge whenever some other path reaches the same target, however
+    much of the codebase's coupling that edge carries. On a layered system the
+    heaviest edges are exactly the ones with an alternative path — a
+    foundation package is reached both directly and through every layer above
+    it — so omitting them draws a graph sparser than the code is.
+
+    ``DOTTED`` therefore draws every edge and distinguishes the implied ones,
+    keeping the essential skeleton legible without understating coupling.
+    ``OMIT`` is the reduction proper, for when only the shape matters.
+    """
+
+    DOTTED = "dotted"
+    SOLID = "solid"
+    OMIT = "omit"
+
+
 def _value(value: Enum | str) -> str:
     return value.value if isinstance(value, Enum) else value
 
@@ -272,10 +292,32 @@ def _node_label(members: tuple[str, ...], cyclic: bool) -> tuple[str, str]:
     return (members[0] if len(members) == 1 else ", ".join(members)), ""
 
 
+def _mermaid_edge_line(
+    source_id: str,
+    target_id: str,
+    raw_count: int,
+    *,
+    dotted: bool,
+) -> str:
+    """Render one edge, labelled with the imports behind it when it stands for
+    more than one.
+
+    Mermaid accepts both ``a -. text .-> b`` and ``a -.->|text| b`` for a
+    labelled dotted link. The pipe form is used here so that the label is
+    delimited the same way as on a solid edge, and so a label containing a
+    period cannot be mistaken for the link's own punctuation.
+    """
+
+    arrow = "-.->" if dotted else "-->"
+    if raw_count > 1:
+        return f"    {source_id} {arrow}|{raw_count} imports| {target_id}"
+    return f"    {source_id} {arrow} {target_id}"
+
+
 def render_mermaid_markdown(
     result: AnalysisResult,
     *,
-    transitive_reduction: bool = True,
+    implied_edges: ImpliedEdges = ImpliedEdges.DOTTED,
 ) -> str:
     """Render Markdown using only the already-derived condensation DAG.
 
@@ -283,9 +325,10 @@ def render_mermaid_markdown(
     drawn top-down, so the drawing carries the layering the analysis already
     computed instead of leaving it to the layout engine to rediscover.
 
-    With ``transitive_reduction`` the diagram omits edges implied by a longer
-    path. Reachability is unchanged and the analysis model still lists every
-    edge; on a layered codebase this is what makes the drawing readable.
+    ``implied_edges`` controls edges a longer path already implies: drawn
+    dotted by default, so the diagram is complete and its skeleton is still
+    legible. See :class:`ImpliedEdges` for why omitting them by default
+    understates coupling.
     """
 
     dag = result.dag
@@ -296,38 +339,49 @@ def render_mermaid_markdown(
     node_ids = {node.id: f"n{index:04d}" for index, node in enumerate(nodes, 1)}
     layer_of = _layer_index(dag)
 
-    drawn = (
-        essential_edges(dag)
-        if transitive_reduction
-        else frozenset((edge.source, edge.target) for edge in dag.edges)
-    )
-    omitted = len(dag.edges) - len(drawn)
+    essential = essential_edges(dag)
+    implied = [
+        edge for edge in dag.edges if (edge.source, edge.target) not in essential
+    ]
 
     grain = "package" if result.view is View.PACKAGE else "module"
+    legend = (
+        "Legend: `A -> B` means A contains an import statically resolved "
+        f"to B. Each node is one {grain}; a node with several members is a "
+        "strongly connected component. Subgraphs are dependency-first "
+        "layers, so an edge always points down the page."
+    )
+    if implied and implied_edges is ImpliedEdges.DOTTED:
+        legend += (
+            " A dotted edge is one a longer path already implies; it is a real "
+            "import all the same, and often a heavy one."
+        )
     lines = [
         "# Python dependency DAG",
         "",
         "Generated file.",
         "",
-        (
-            "Legend: `A -> B` means A contains an import statically resolved "
-            f"to B. Each node is one {grain}; a node with several members is a "
-            "strongly connected component. Subgraphs are dependency-first "
-            "layers, so an edge always points down the page."
-        ),
+        legend,
         "",
     ]
-    if omitted:
-        lines.extend(
-            [
-                (
-                    f"> {omitted} of {len(dag.edges)} edges are implied by a "
-                    "longer path and are not drawn. Reachability is unchanged; "
-                    "`dependency-graph.json` lists every edge."
-                ),
-                "",
-            ]
-        )
+    if implied:
+        note = {
+            ImpliedEdges.DOTTED: (
+                f"> {len(implied)} of {len(dag.edges)} edges are implied by a "
+                "longer path and are drawn dotted."
+            ),
+            ImpliedEdges.SOLID: (
+                f"> {len(implied)} of {len(dag.edges)} edges are implied by a "
+                "longer path. All edges are drawn alike."
+            ),
+            ImpliedEdges.OMIT: (
+                f"> {len(implied)} of {len(dag.edges)} edges are implied by a "
+                "longer path and are not drawn. Reachability is unchanged, but "
+                "the omitted edges may carry most of the coupling; "
+                "`dependency-graph.json` lists every edge."
+            ),
+        }[implied_edges]
+        lines.extend([note, ""])
     if len(nodes) > MERMAID_NODE_WARNING_THRESHOLD:
         lines.extend(
             [
@@ -366,15 +420,17 @@ def render_mermaid_markdown(
             )
 
     for edge in sorted(dag.edges, key=lambda item: (item.source, item.target)):
-        if (edge.source, edge.target) not in drawn:
+        is_implied = (edge.source, edge.target) not in essential
+        if is_implied and implied_edges is ImpliedEdges.OMIT:
             continue
-        source_id = node_ids[edge.source]
-        target_id = node_ids[edge.target]
-        raw_count = len(edge.raw_dependencies)
-        if raw_count > 1:
-            lines.append(f"    {source_id} -->|{raw_count} imports| {target_id}")
-        else:
-            lines.append(f"    {source_id} --> {target_id}")
+        lines.append(
+            _mermaid_edge_line(
+                node_ids[edge.source],
+                node_ids[edge.target],
+                len(edge.raw_dependencies),
+                dotted=is_implied and implied_edges is ImpliedEdges.DOTTED,
+            )
+        )
 
     lines.extend(
         [

@@ -23,7 +23,11 @@ from pyarchgraph.model import (
     UnresolvedReason,
     View,
 )
-from pyarchgraph.rendering import render_json, render_mermaid_markdown
+from pyarchgraph.rendering import (
+    ImpliedEdges,
+    render_json,
+    render_mermaid_markdown,
+)
 
 
 def _result(*, dag: Dag, **overrides: object) -> AnalysisResult:
@@ -272,3 +276,90 @@ def test_single_raw_dependency_has_no_edge_count_label() -> None:
     rendered = render_mermaid_markdown(_result(dag=dag))
     assert "n0001 --> n0002" in rendered
     assert "|1 import" not in rendered
+
+
+def _implied_dag() -> Dag:
+    """a -> b -> c plus a direct a -> c that the longer path implies."""
+    return Dag(
+        nodes=(
+            DagNode("a", ("a",), False),
+            DagNode("b", ("b",), False),
+            DagNode("c", ("c",), False),
+        ),
+        edges=(
+            DagEdge("a", "b", (RawDependency("a", "b"),)),
+            DagEdge("b", "c", (RawDependency("b", "c"),)),
+            DagEdge(
+                "a",
+                "c",
+                (RawDependency("a1", "c"), RawDependency("a2", "c")),
+            ),
+        ),
+        dependency_first_layers=(("c",), ("b",), ("a",)),
+    )
+
+
+def test_implied_edges_are_dotted_by_default_not_dropped() -> None:
+    rendered = render_mermaid_markdown(_result(dag=_implied_dag()))
+
+    # a -> c is implied by a -> b -> c, and carries two imports.
+    assert "n0001 -.->|2 imports| n0003" in rendered
+    assert "n0001 --> n0002" in rendered
+    assert "n0002 --> n0003" in rendered
+    assert "drawn dotted" in rendered
+
+
+def test_solid_mode_draws_every_edge_alike() -> None:
+    rendered = render_mermaid_markdown(
+        _result(dag=_implied_dag()), implied_edges=ImpliedEdges.SOLID
+    )
+
+    assert "n0001 -->|2 imports| n0003" in rendered
+    assert "-." not in rendered
+    assert "All edges are drawn alike" in rendered
+
+
+def test_omit_mode_drops_the_implied_edge_and_says_so() -> None:
+    rendered = render_mermaid_markdown(
+        _result(dag=_implied_dag()), implied_edges=ImpliedEdges.OMIT
+    )
+
+    assert "n0001 -" not in rendered.split("n0001 --> n0002")[1]
+    assert "n0003" in rendered  # the node survives; only the edge goes
+    assert "are not drawn" in rendered
+    assert (
+        "understates coupling" in rendered or "carry most of the coupling" in rendered
+    )
+
+
+def test_a_single_import_implied_edge_is_dotted_without_a_label() -> None:
+    dag = Dag(
+        nodes=(
+            DagNode("a", ("a",), False),
+            DagNode("b", ("b",), False),
+            DagNode("c", ("c",), False),
+        ),
+        edges=(
+            DagEdge("a", "b", (RawDependency("a", "b"),)),
+            DagEdge("b", "c", (RawDependency("b", "c"),)),
+            DagEdge("a", "c", (RawDependency("a", "c"),)),
+        ),
+        dependency_first_layers=(("c",), ("b",), ("a",)),
+    )
+
+    rendered = render_mermaid_markdown(_result(dag=dag))
+
+    assert "n0001 -.-> n0003" in rendered
+
+
+def test_no_implied_note_when_every_edge_is_essential() -> None:
+    dag = Dag(
+        nodes=(DagNode("a", ("a",), False), DagNode("b", ("b",), False)),
+        edges=(DagEdge("a", "b", (RawDependency("a", "b"),)),),
+        dependency_first_layers=(("b",), ("a",)),
+    )
+
+    rendered = render_mermaid_markdown(_result(dag=dag))
+
+    assert "implied by a longer path" not in rendered
+    assert "-." not in rendered

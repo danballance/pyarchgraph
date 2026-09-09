@@ -13,7 +13,11 @@ from pyarchgraph.analysis import DEFAULT_PACKAGE_DEPTH, analyse
 from pyarchgraph.model import View
 from pyarchgraph.projection import MINIMUM_PACKAGE_DEPTH
 from pyarchgraph.model import Diagnostic
-from pyarchgraph.rendering import render_json, render_mermaid_markdown
+from pyarchgraph.rendering import (
+    ImpliedEdges,
+    render_json,
+    render_mermaid_markdown,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -66,12 +70,16 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--transitive-reduction",
-        action=argparse.BooleanOptionalAction,
-        default=True,
+        "--implied-edges",
+        choices=[option.value for option in ImpliedEdges],
+        default=ImpliedEdges.DOTTED.value,
         help=(
-            "omit diagram edges implied by a longer path (default: enabled). "
-            "Reachability is unchanged and the JSON always lists every edge"
+            "how the diagram draws an edge a longer path already implies: "
+            "'dotted' (default) draws it dotted, 'solid' draws it like any "
+            "other, 'omit' leaves it out. Omitting keeps reachability but "
+            "understates coupling, because the implied edges on a layered "
+            "codebase are often the heaviest ones. The JSON always lists "
+            "every edge"
         ),
     )
     return parser
@@ -169,7 +177,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         json_output = render_json(result)
         mermaid_output = render_mermaid_markdown(
             result,
-            transitive_reduction=args.transitive_reduction,
+            implied_edges=ImpliedEdges(args.implied_edges),
         )
         args.output_dir.mkdir(parents=True, exist_ok=True)
         _write_outputs_atomically(

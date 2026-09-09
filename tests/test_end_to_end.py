@@ -566,23 +566,23 @@ raise RuntimeError("target code must never execute")
     mermaid_node_lines = re.findall(
         r'^ +n\d{4}\[".*"\](?:\:\:\:cycle)?$', markdown, re.MULTILINE
     )
-    mermaid_edge_lines = re.findall(
-        r"^    n\d{4} -->.* n\d{4}$", markdown, re.MULTILINE
-    )
+    mermaid_edge_lines = re.findall(r"^    n\d{4} .* n\d{4}$", markdown, re.MULTILINE)
     assert len(mermaid_node_lines) == len(dag["nodes"])
-    # Edges default to the transitive reduction, so the diagram carries a
-    # subset whose reachability matches the full edge set.
-    assert 0 < len(mermaid_edge_lines) <= len(dag["edges"])
+    # The default hides nothing: every condensation edge is drawn, and the ones
+    # a longer path implies are dotted rather than dropped.
+    assert len(mermaid_edge_lines) == len(dag["edges"])
     assert "flowchart TD" in markdown
+    dotted = re.findall(r"^    n\d{4} -\.->.* n\d{4}$", markdown, re.MULTILINE)
+    assert dotted, "this tree has implied edges, so some should be dotted"
 
-    # ...and the full edge set is recoverable on request.
-    unreduced_dir = output_dir.parent / "unreduced"
-    unreduced_run = _run_cli(source_root, unreduced_dir, "--no-transitive-reduction")
-    assert unreduced_run.returncode == 1, unreduced_run.stderr
-    unreduced = (unreduced_dir / "dependency-dag.md").read_text(encoding="utf-8")
-    assert len(
-        re.findall(r"^    n\d{4} -->.* n\d{4}$", unreduced, re.MULTILINE)
-    ) == len(dag["edges"])
+    # ...and the reduction proper is still available.
+    omitted_dir = output_dir.parent / "omitted"
+    omitted_run = _run_cli(source_root, omitted_dir, "--implied-edges", "omit")
+    assert omitted_run.returncode == 1, omitted_run.stderr
+    omitted = (omitted_dir / "dependency-dag.md").read_text(encoding="utf-8")
+    omitted_edges = re.findall(r"^    n\d{4} .* n\d{4}$", omitted, re.MULTILINE)
+    assert len(omitted_edges) == len(dag["edges"]) - len(dotted)
+    assert not re.findall(r"^    n\d{4} -\.->.* n\d{4}$", omitted, re.MULTILINE)
     assert markdown.count(":::cycle") == 2
     assert "Cycle (2): pkg.cycle_a, pkg.cycle_b" in markdown
     assert "pkg.isolated" in markdown

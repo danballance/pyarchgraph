@@ -63,9 +63,23 @@ behind it.
 uv run pyarchgraph SOURCE_ROOT --view package
 ```
 
-The diagram omits edges implied by a longer path. Reachability is unchanged --
-this is the transitive reduction, not a sample -- and the JSON always lists
-every edge. Pass `--no-transitive-reduction` to draw them all.
+`--implied-edges` controls how the diagram draws an edge that a longer path
+already implies -- `dotted` (default), `solid`, or `omit`.
+
+The default hides nothing. It draws every edge and dots the implied ones, so
+the essential skeleton stays legible while the real coupling is still on the
+page. `omit` is the transitive reduction proper: reachability is unchanged, but
+be careful reading it as a picture of coupling. The reduction is weight-blind,
+dropping an edge whenever any other path reaches the same target regardless of
+how many imports it stands for -- and on a layered codebase the implied edges
+are usually the heaviest, because a foundation package is reached both directly
+and through every layer above it. On one real 28-edge graph the 13 omitted
+edges carried 76% of the module imports, including `infrastructure -> kernel`,
+justified away by a path through the HTTP layer.
+
+```console
+uv run pyarchgraph SOURCE_ROOT --view package --implied-edges omit
+```
 
 Both settings affect only the condensation DAG and the diagram. `modules`,
 `import_facts` and `dependencies` are always reported at module grain, so the
