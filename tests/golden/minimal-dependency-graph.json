@@ -1,6 +1,7 @@
 {
   "analysis": {
     "complete": true,
+    "excludes": [],
     "namespace_prefixes": [],
     "python_version": "NORMALIZED",
     "view": {

@@ -40,8 +40,42 @@ uv run pyarchgraph . --exclude 'pkg/generated/**' --exclude 'tests/**'
 The command writes:
 
 - `dependency-graph.json`, the canonical evidence-rich model; and
-- `dependency-dag.md`, a Mermaid `flowchart LR` derived only from that model's
-  condensation DAG.
+- `dependency-dag.md`, a Mermaid `flowchart TD` derived only from that model's
+  condensation DAG, with one `subgraph` per dependency-first layer so an edge
+  always points down the page.
+
+## Making a large graph readable
+
+A module-level diagram of a well-layered codebase is hard to read for the same
+reason the codebase is well layered: a shared foundation module is imported
+directly from every layer above it, so most edges span most of the drawing.
+Two options address that without changing what is recorded.
+
+`--view package` projects modules onto a package prefix before condensing.
+`--package-depth` sets how many dotted segments to keep (default `2`, which
+usually gives one node per architectural area; `1` groups by top-level
+package). The projection runs through the same strongly-connected-component
+pass as the module view, because grouping can create a cycle the module graph
+does not have. Each package edge is labelled with the number of module imports
+behind it.
+
+```console
+uv run pyarchgraph SOURCE_ROOT --view package
+```
+
+The diagram omits edges implied by a longer path. Reachability is unchanged --
+this is the transitive reduction, not a sample -- and the JSON always lists
+every edge. Pass `--no-transitive-reduction` to draw them all.
+
+Both settings affect only the condensation DAG and the diagram. `modules`,
+`import_facts` and `dependencies` are always reported at module grain, so the
+evidence does not change with the view.
+
+The `analysis` block records `excludes`, `view` and `package_depth`, so a
+committed artifact states what it covered -- without them a reader cannot tell
+an excluded package from an absent one. The source root is deliberately not
+recorded: every path in the document is relative to it, which is what lets an
+artifact be compared between machines.
 
 Exit status `0` means every non-excluded candidate received an unambiguous
 module identity and was successfully read, decoded, and parsed.

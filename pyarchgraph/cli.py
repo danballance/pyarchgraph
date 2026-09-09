@@ -9,7 +9,9 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from pyarchgraph.analysis import analyse
+from pyarchgraph.analysis import DEFAULT_PACKAGE_DEPTH, analyse
+from pyarchgraph.model import View
+from pyarchgraph.projection import MINIMUM_PACKAGE_DEPTH
 from pyarchgraph.model import Diagnostic
 from pyarchgraph.rendering import render_json, render_mermaid_markdown
 
@@ -40,6 +42,37 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
         metavar="GLOB",
         help="exclude a POSIX-relative file or directory glob; may be repeated",
+    )
+    parser.add_argument(
+        "--view",
+        choices=[view.value for view in View],
+        default=View.MODULE.value,
+        help=(
+            "grain of the emitted DAG and diagram: 'module' (default) or "
+            "'package', which projects modules onto a package prefix. The "
+            "JSON always reports modules, facts and dependencies at module "
+            "grain regardless of this setting"
+        ),
+    )
+    parser.add_argument(
+        "--package-depth",
+        type=int,
+        default=DEFAULT_PACKAGE_DEPTH,
+        metavar="N",
+        help=(
+            "dotted segments to keep when --view package projects a module "
+            f"(default: {DEFAULT_PACKAGE_DEPTH}). Depth 1 groups by top-level "
+            "package; depth 2 usually gives one node per architectural area"
+        ),
+    )
+    parser.add_argument(
+        "--transitive-reduction",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "omit diagram edges implied by a longer path (default: enabled). "
+            "Reachability is unchanged and the JSON always lists every edge"
+        ),
     )
     return parser
 
@@ -115,6 +148,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"source root is not a directory: {args.source_root}")
     if args.output_dir.exists() and not args.output_dir.is_dir():
         parser.error(f"output path is not a directory: {args.output_dir}")
+    if args.package_depth < MINIMUM_PACKAGE_DEPTH:
+        parser.error(
+            f"--package-depth must be >= {MINIMUM_PACKAGE_DEPTH}: {args.package_depth}"
+        )
 
     json_path = args.output_dir / "dependency-graph.json"
     mermaid_path = args.output_dir / "dependency-dag.md"
@@ -126,9 +163,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = analyse(
             args.source_root,
             excludes=tuple(args.exclude),
+            view=View(args.view),
+            package_depth=args.package_depth,
         )
         json_output = render_json(result)
-        mermaid_output = render_mermaid_markdown(result)
+        mermaid_output = render_mermaid_markdown(
+            result,
+            transitive_reduction=args.transitive_reduction,
+        )
         args.output_dir.mkdir(parents=True, exist_ok=True)
         _write_outputs_atomically(
             json_path,

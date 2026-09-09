@@ -40,6 +40,19 @@ class ExternalClassification(str, Enum):
     EXTERNAL_UNKNOWN = "external_unknown"
 
 
+class View(str, Enum):
+    """Which graph the condensation DAG and diagram describe.
+
+    ``MODULE`` is the analysis's own grain: one node per source module.
+    ``PACKAGE`` projects those modules onto a package prefix before
+    condensing, which is a presentation choice — the module-level evidence in
+    an ``AnalysisResult`` is unchanged by it.
+    """
+
+    MODULE = "module"
+    PACKAGE = "package"
+
+
 class UnresolvedReason(str, Enum):
     MISSING_INTERNAL_TARGET = "missing_internal_target"
     NAMESPACE_BASE_UNMODELLED = "namespace_base_unmodelled"
@@ -200,8 +213,20 @@ class Dag:
 
 @dataclass(frozen=True, slots=True)
 class AnalysisResult:
+    """One analysis, its provenance, and the graph derived from it.
+
+    ``excludes``, ``view`` and ``package_depth`` are recorded so a written
+    artifact states what it covered: without them a consumer cannot tell an
+    excluded package from an absent one. The source root is deliberately not
+    recorded — every path here is relative to it, which is what keeps an
+    artifact portable between machines.
+    """
+
     complete: bool
     python_version: str
+    excludes: tuple[str, ...]
+    view: View
+    package_depth: int | None
     namespace_prefixes: tuple[str, ...]
     modules: tuple[SourceModule, ...]
     import_facts: tuple[ImportFact, ...]

@@ -38,7 +38,11 @@ def _write(root: Path, relative_path: str, source: str) -> None:
     path.write_text(source, encoding="utf-8")
 
 
-def _run_cli(source_root: Path, output_dir: Path) -> subprocess.CompletedProcess[str]:
+def _run_cli(
+    source_root: Path,
+    output_dir: Path,
+    *extra: str,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
@@ -47,6 +51,7 @@ def _run_cli(source_root: Path, output_dir: Path) -> subprocess.CompletedProcess
             str(source_root),
             "--output-dir",
             str(output_dir),
+            *extra,
         ],
         cwd=source_root.parent,
         check=False,
@@ -259,6 +264,7 @@ raise RuntimeError("target code must never execute")
         "node_kind": "python_module",
     }
     assert set(document["analysis"]) == {
+        "excludes",
         "complete",
         "python_version",
         "namespace_prefixes",
@@ -555,15 +561,28 @@ raise RuntimeError("target code must never execute")
         str(source_root) not in item["message"] for item in document["diagnostics"]
     )
 
-    # Mermaid is a complete view of exactly the JSON condensation DAG.
+    # Mermaid shows every condensation node; nodes inside a layer subgraph are
+    # indented one level further than an unlayered one.
     mermaid_node_lines = re.findall(
-        r'^    n\d{4}\[".*"\](?:\:\:\:cycle)?$', markdown, re.MULTILINE
+        r'^ +n\d{4}\[".*"\](?:\:\:\:cycle)?$', markdown, re.MULTILINE
     )
     mermaid_edge_lines = re.findall(
         r"^    n\d{4} -->.* n\d{4}$", markdown, re.MULTILINE
     )
     assert len(mermaid_node_lines) == len(dag["nodes"])
-    assert len(mermaid_edge_lines) == len(dag["edges"])
+    # Edges default to the transitive reduction, so the diagram carries a
+    # subset whose reachability matches the full edge set.
+    assert 0 < len(mermaid_edge_lines) <= len(dag["edges"])
+    assert "flowchart TD" in markdown
+
+    # ...and the full edge set is recoverable on request.
+    unreduced_dir = output_dir.parent / "unreduced"
+    unreduced_run = _run_cli(source_root, unreduced_dir, "--no-transitive-reduction")
+    assert unreduced_run.returncode == 1, unreduced_run.stderr
+    unreduced = (unreduced_dir / "dependency-dag.md").read_text(encoding="utf-8")
+    assert len(
+        re.findall(r"^    n\d{4} -->.* n\d{4}$", unreduced, re.MULTILINE)
+    ) == len(dag["edges"])
     assert markdown.count(":::cycle") == 2
     assert "Cycle (2): pkg.cycle_a, pkg.cycle_b" in markdown
     assert "pkg.isolated" in markdown

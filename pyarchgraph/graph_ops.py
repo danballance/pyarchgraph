@@ -190,3 +190,24 @@ def build_dag(
         edges=edges,
         dependency_first_layers=dependency_first_layers,
     )
+
+
+def essential_edges(dag: Dag) -> frozenset[tuple[str, str]]:
+    """Return the transitive reduction of ``dag`` as source/target ID pairs.
+
+    The reduction is the unique smallest edge set with the same reachability,
+    so dropping the rest changes nothing a reader can conclude about what
+    depends on what — it only removes edges implied by a longer path. On a
+    layered codebase this is typically a large fraction of the drawing,
+    because a foundation module is imported both directly and through every
+    layer between.
+
+    Intended for rendering only. The edges omitted here are real imports and
+    remain in the analysis model.
+    """
+
+    condensed = nx.DiGraph()
+    condensed.add_nodes_from(sorted(node.id for node in dag.nodes))
+    condensed.add_edges_from(sorted((edge.source, edge.target) for edge in dag.edges))
+    reduced = nx.transitive_reduction(condensed)
+    return frozenset((source, target) for source, target in reduced.edges)

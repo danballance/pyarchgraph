@@ -21,6 +21,7 @@ from pyarchgraph.model import (
     SourceModule,
     UnresolvedImport,
     UnresolvedReason,
+    View,
 )
 from pyarchgraph.rendering import render_json, render_mermaid_markdown
 
@@ -29,6 +30,9 @@ def _result(*, dag: Dag, **overrides: object) -> AnalysisResult:
     values: dict[str, object] = {
         "complete": True,
         "python_version": "3.14.7",
+        "excludes": (),
+        "view": View.MODULE,
+        "package_depth": None,
         "namespace_prefixes": (),
         "modules": (),
         "import_facts": (),
@@ -127,6 +131,7 @@ def test_render_json_emits_complete_contract_and_canonical_order() -> None:
     }
     assert payload["analysis"] == {
         "complete": True,
+        "excludes": [],
         "namespace_prefixes": ["alpha", "zeta"],
         "python_version": "3.14.7",
         "view": {"kind": "module"},
@@ -215,12 +220,16 @@ def test_mermaid_is_derived_only_from_dag_and_is_deterministic() -> None:
 
 Generated file.
 
-Legend: `A -> B` means A contains an import statically resolved to B. Cycle nodes are strongly connected components.
+Legend: `A -> B` means A contains an import statically resolved to B. Each node is one module; a node with several members is a strongly connected component. Subgraphs are dependency-first layers, so an edge always points down the page.
 
 ```mermaid
-flowchart LR
-    n0001["Cycle (2): a&#92;, b&quot;&amp;&lt;&#10;"]:::cycle
-    n0002["z"]
+flowchart TD
+    subgraph layer1["Layer 1"]
+        n0001["Cycle (2): a&#92;, b&quot;&amp;&lt;&#10;"]:::cycle
+    end
+    subgraph layer0["Layer 0"]
+        n0002["z"]
+    end
     n0001 -->|2 imports| n0002
     classDef cycle fill:#fff1f2,stroke:#be123c,stroke-width:2px
 ```
@@ -246,7 +255,7 @@ def test_mermaid_warns_only_above_advisory_threshold_without_truncating() -> Non
     assert "Warning:" not in at_threshold
     assert "Warning:" in above_threshold
     assert "201 nodes" in above_threshold
-    assert "package-prefix projection" in above_threshold
+    assert "--view package" in above_threshold
     assert sum('["m' in line for line in above_threshold.splitlines()) == 201
 
 

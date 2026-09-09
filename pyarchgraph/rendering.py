@@ -6,7 +6,8 @@ from enum import Enum
 import json
 from typing import Any
 
-from pyarchgraph.model import AnalysisResult, Diagnostic, ImportFact
+from pyarchgraph.graph_ops import essential_edges
+from pyarchgraph.model import AnalysisResult, Dag, Diagnostic, ImportFact, View
 
 
 MERMAID_NODE_WARNING_THRESHOLD = 200
@@ -63,6 +64,15 @@ def _diagnostic_json(diagnostic: Diagnostic) -> dict[str, Any]:
     return rendered
 
 
+def _view_json(result: AnalysisResult) -> dict[str, Any]:
+    """Describe the grain of the emitted DAG, including its projection depth."""
+
+    rendered: dict[str, Any] = {"kind": _value(result.view)}
+    if result.package_depth is not None:
+        rendered["package_depth"] = result.package_depth
+    return rendered
+
+
 def _as_json_model(result: AnalysisResult) -> dict[str, Any]:
     """Convert domain objects to the complete v0.1 JSON boundary model."""
 
@@ -107,8 +117,9 @@ def _as_json_model(result: AnalysisResult) -> dict[str, Any]:
         "analysis": {
             "complete": result.complete,
             "python_version": result.python_version,
+            "excludes": sorted(result.excludes),
             "namespace_prefixes": sorted(result.namespace_prefixes),
-            "view": {"kind": "module"},
+            "view": _view_json(result),
         },
         "modules": [
             {
@@ -243,15 +254,56 @@ def _escape_mermaid_label(label: str) -> str:
     )
 
 
-def render_mermaid_markdown(result: AnalysisResult) -> str:
-    """Render Markdown using only the already-derived condensation DAG."""
+def _layer_index(dag: Dag) -> dict[str, int]:
+    """Map each node ID to its dependency-first layer position."""
 
+    return {
+        node_id: index
+        for index, layer in enumerate(dag.dependency_first_layers)
+        for node_id in layer
+    }
+
+
+def _node_label(members: tuple[str, ...], cyclic: bool) -> tuple[str, str]:
+    """Return the Mermaid label and class suffix for one condensed node."""
+
+    if cyclic:
+        return f"Cycle ({len(members)}): {', '.join(members)}", ":::cycle"
+    return (members[0] if len(members) == 1 else ", ".join(members)), ""
+
+
+def render_mermaid_markdown(
+    result: AnalysisResult,
+    *,
+    transitive_reduction: bool = True,
+) -> str:
+    """Render Markdown using only the already-derived condensation DAG.
+
+    Nodes are grouped into ``subgraph`` blocks by dependency-first layer and
+    drawn top-down, so the drawing carries the layering the analysis already
+    computed instead of leaving it to the layout engine to rediscover.
+
+    With ``transitive_reduction`` the diagram omits edges implied by a longer
+    path. Reachability is unchanged and the analysis model still lists every
+    edge; on a layered codebase this is what makes the drawing readable.
+    """
+
+    dag = result.dag
     nodes = sorted(
-        result.dag.nodes,
+        dag.nodes,
         key=lambda node: (tuple(sorted(node.members)), node.id),
     )
     node_ids = {node.id: f"n{index:04d}" for index, node in enumerate(nodes, 1)}
+    layer_of = _layer_index(dag)
 
+    drawn = (
+        essential_edges(dag)
+        if transitive_reduction
+        else frozenset((edge.source, edge.target) for edge in dag.edges)
+    )
+    omitted = len(dag.edges) - len(drawn)
+
+    grain = "package" if result.view is View.PACKAGE else "module"
     lines = [
         "# Python dependency DAG",
         "",
@@ -259,38 +311,63 @@ def render_mermaid_markdown(result: AnalysisResult) -> str:
         "",
         (
             "Legend: `A -> B` means A contains an import statically resolved "
-            "to B. Cycle nodes are strongly connected components."
+            f"to B. Each node is one {grain}; a node with several members is a "
+            "strongly connected component. Subgraphs are dependency-first "
+            "layers, so an edge always points down the page."
         ),
         "",
     ]
+    if omitted:
+        lines.extend(
+            [
+                (
+                    f"> {omitted} of {len(dag.edges)} edges are implied by a "
+                    "longer path and are not drawn. Reachability is unchanged; "
+                    "`dependency-graph.json` lists every edge."
+                ),
+                "",
+            ]
+        )
     if len(nodes) > MERMAID_NODE_WARNING_THRESHOLD:
         lines.extend(
             [
                 (
                     f"> Warning: this DAG has {len(nodes)} nodes, above the "
                     f"advisory Mermaid threshold of "
-                    f"{MERMAID_NODE_WARNING_THRESHOLD}. The full graph is "
-                    "included; consider a future package-prefix projection if "
-                    "module-level rendering is unreadable."
+                    f"{MERMAID_NODE_WARNING_THRESHOLD}. Consider "
+                    "`--view package` for a readable projection."
                 ),
                 "",
             ]
         )
 
-    lines.extend(["```mermaid", "flowchart LR"])
-    for node in nodes:
-        members = tuple(sorted(node.members))
-        if node.cyclic:
-            label = f"Cycle ({len(members)}): {', '.join(members)}"
-            class_suffix = ":::cycle"
-        else:
-            label = members[0] if len(members) == 1 else ", ".join(members)
-            class_suffix = ""
-        lines.append(
-            f'    {node_ids[node.id]}["{_escape_mermaid_label(label)}"]{class_suffix}'
-        )
+    lines.extend(["```mermaid", "flowchart TD"])
 
-    for edge in sorted(result.dag.edges, key=lambda item: (item.source, item.target)):
+    # Most-dependent layer first, so the source order matches the drawn order.
+    for index in range(len(dag.dependency_first_layers) - 1, -1, -1):
+        members = [node for node in nodes if layer_of.get(node.id) == index]
+        if not members:
+            continue
+        lines.append(f'    subgraph layer{index}["Layer {index}"]')
+        for node in members:
+            label, class_suffix = _node_label(tuple(sorted(node.members)), node.cyclic)
+            lines.append(
+                f"        {node_ids[node.id]}"
+                f'["{_escape_mermaid_label(label)}"]{class_suffix}'
+            )
+        lines.append("    end")
+
+    for node in nodes:
+        if node.id not in layer_of:
+            label, class_suffix = _node_label(tuple(sorted(node.members)), node.cyclic)
+            lines.append(
+                f"    {node_ids[node.id]}"
+                f'["{_escape_mermaid_label(label)}"]{class_suffix}'
+            )
+
+    for edge in sorted(dag.edges, key=lambda item: (item.source, item.target)):
+        if (edge.source, edge.target) not in drawn:
+            continue
         source_id = node_ids[edge.source]
         target_id = node_ids[edge.target]
         raw_count = len(edge.raw_dependencies)

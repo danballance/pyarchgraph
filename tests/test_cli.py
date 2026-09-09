@@ -50,7 +50,7 @@ def test_cli_writes_complete_outputs_without_executing_source(
         "pkg.never_execute",
     }
     assert sum(node["cyclic"] for node in document["dag"]["nodes"]) == 1
-    assert "flowchart LR" in (output_dir / "dependency-dag.md").read_text()
+    assert "flowchart TD" in (output_dir / "dependency-dag.md").read_text()
     assert "4 modules" in capsys.readouterr().err
 
 
@@ -207,3 +207,81 @@ def test_analyse_canonicalises_injected_facts_and_respects_source_errors(
     assert result.import_facts[0].id.startswith("fact-")
     assert len(result.import_facts[0].id) == len("fact-") + 12
     assert result.dependencies[0].evidence[0].fact_id == result.import_facts[0].id
+
+
+def test_cli_package_view_projects_and_records_its_depth(tmp_path: Path) -> None:
+    source_root = tmp_path / "src"
+    output_dir = tmp_path / "out"
+    _write(source_root, "pkg/__init__.py", "")
+    _write(source_root, "pkg/api.py", "from lib.core import VALUE\n")
+    _write(source_root, "pkg/extra.py", "from lib.core import VALUE\n")
+    _write(source_root, "lib/__init__.py", "")
+    _write(source_root, "lib/core.py", "VALUE = 1\n")
+
+    status = main(
+        [
+            str(source_root),
+            "--output-dir",
+            str(output_dir),
+            "--view",
+            "package",
+            "--package-depth",
+            "1",
+        ]
+    )
+
+    assert status == 0
+    document = json.loads((output_dir / "dependency-graph.json").read_text())
+    assert document["analysis"]["view"] == {"kind": "package", "package_depth": 1}
+    # Modules stay at module grain; only the DAG is projected.
+    assert {module["id"] for module in document["modules"]} == {
+        "pkg",
+        "pkg.api",
+        "pkg.extra",
+        "lib",
+        "lib.core",
+    }
+    assert [node["members"] for node in document["dag"]["nodes"]] == [["lib"], ["pkg"]]
+    edge = document["dag"]["edges"][0]
+    assert [(raw["source"], raw["target"]) for raw in edge["raw_dependencies"]] == [
+        ("pkg.api", "lib.core"),
+        ("pkg.extra", "lib.core"),
+    ]
+
+
+def test_cli_module_view_records_no_package_depth(tmp_path: Path) -> None:
+    source_root = tmp_path / "src"
+    output_dir = tmp_path / "out"
+    _write(source_root, "solo.py", "VALUE = 1\n")
+
+    assert main([str(source_root), "--output-dir", str(output_dir)]) == 0
+
+    document = json.loads((output_dir / "dependency-graph.json").read_text())
+    assert document["analysis"]["view"] == {"kind": "module"}
+
+
+def test_cli_records_the_excludes_that_shaped_the_analysis(tmp_path: Path) -> None:
+    """An artifact must distinguish an excluded package from an absent one."""
+    source_root = tmp_path / "src"
+    output_dir = tmp_path / "out"
+    _write(source_root, "kept.py", "VALUE = 1\n")
+    _write(source_root, "dropped.py", "VALUE = 2\n")
+
+    status = main(
+        [str(source_root), "--output-dir", str(output_dir), "--exclude", "dropped.py"]
+    )
+
+    assert status == 0
+    document = json.loads((output_dir / "dependency-graph.json").read_text())
+    assert document["analysis"]["excludes"] == ["dropped.py"]
+    assert {module["id"] for module in document["modules"]} == {"kept"}
+
+
+def test_cli_rejects_a_package_depth_below_one(tmp_path: Path) -> None:
+    source_root = tmp_path / "src"
+    _write(source_root, "solo.py", "VALUE = 1\n")
+
+    with pytest.raises(SystemExit) as caught:
+        main([str(source_root), "--view", "package", "--package-depth", "0"])
+
+    assert caught.value.code == 2
