@@ -95,7 +95,30 @@
       "path": "b.py"
     }
   ],
-  "schema_version": "0.1",
+  "quality": {
+    "cycle_avoidance_score": 100.0,
+    "dependency_isolation_score": 50.0,
+    "dynamic_import_warning_count": 0,
+    "formula_version": "architecture-v1",
+    "metrics": {
+      "active_module_count": 2,
+      "cycle_fraction": 0.0,
+      "cyclic_component_count": 0,
+      "cyclic_module_count": 0,
+      "dependency_count": 1,
+      "isolated_module_count": 0,
+      "largest_cycle_size": 0,
+      "max_fan_in": 1,
+      "max_fan_out": 1,
+      "module_count": 2,
+      "reach_fraction": 0.5,
+      "reachable_pair_count": 1
+    },
+    "score": 85.0,
+    "unavailable_reason": null,
+    "unresolved_import_count": 0
+  },
+  "schema_version": "0.2",
   "semantics": {
     "dynamic_imports": "diagnosed_not_resolved",
     "edge_direction": "importer_to_imported",

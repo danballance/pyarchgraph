@@ -28,6 +28,7 @@ from pyarchgraph.rendering import (
     render_json,
     render_mermaid_markdown,
 )
+from pyarchgraph.quality import calculate_quality
 
 
 def _result(*, dag: Dag, **overrides: object) -> AnalysisResult:
@@ -47,6 +48,16 @@ def _result(*, dag: Dag, **overrides: object) -> AnalysisResult:
         "diagnostics": (),
     }
     values.update(overrides)
+    values["quality"] = calculate_quality(
+        values["modules"] or (),
+        values["dependencies"] or (),
+        complete=values["complete"],
+        unresolved_import_count=len(values["unresolved_imports"] or ()),
+        dynamic_import_warning_count=sum(
+            diagnostic.code == "dynamic_import_ignored"
+            for diagnostic in (values["diagnostics"] or ())
+        ),
+    )
     return AnalysisResult(**values)  # type: ignore[arg-type]
 
 
@@ -124,7 +135,11 @@ def test_render_json_emits_complete_contract_and_canonical_order() -> None:
 
     assert rendered.endswith("\n") and not rendered.endswith("\n\n")
     assert render_json(result) == rendered
-    assert payload["schema_version"] == "0.1"
+    assert payload["schema_version"] == "0.2"
+    assert payload["quality"]["score"] == 85.0
+    assert payload["quality"]["formula_version"] == "architecture-v1"
+    assert payload["quality"]["unresolved_import_count"] == 1
+    assert payload["quality"]["dynamic_import_warning_count"] == 1
     assert payload["semantics"] == {
         "dynamic_imports": "diagnosed_not_resolved",
         "edge_direction": "importer_to_imported",
@@ -210,8 +225,8 @@ def test_mermaid_is_derived_only_from_dag_and_is_deterministic() -> None:
         ),
         dependency_first_layers=(("plain",), ("cycle",)),
     )
-    # Non-DAG fields deliberately contain None: the Mermaid renderer must not
-    # inspect them or rebuild SCC/edge semantics.
+    # Raw input fields deliberately contain None: the renderer must use the
+    # stored quality and DAG, without inspecting facts or rebuilding topology.
     result = _result(
         dag=dag,
         modules=None,
@@ -223,6 +238,26 @@ def test_mermaid_is_derived_only_from_dag_and_is_deterministic() -> None:
     expected = """# Python dependency DAG
 
 Generated file.
+
+## Architecture quality
+
+**Architecture score: unavailable (no modules) (experimental, architecture-v1)**
+
+The score uses raw module dependencies in every diagram view. Higher is better under this heuristic; isolated modules do not affect it.
+
+| Metric | Value |
+| --- | --- |
+| Cycle avoidance (70%) | unavailable |
+| Dependency isolation (30%) | unavailable |
+| Modules: total / active / isolated | 0 / 0 / 0 |
+| Internal dependencies | 0 |
+| Cyclic components / cyclic modules / largest cycle | 0 / 0 / 0 |
+| Reachable ordered pairs (excluding self) | 0 |
+| Maximum fan-in / fan-out | 0 / 0 |
+| Unresolved import records | 0 |
+| Dynamic-import warnings | 0 |
+
+Compare runs with the same source root, exclusions and analyser/formula versions. This experimental score measures dependency structure, not overall code quality.
 
 Legend: `A -> B` means A contains an import statically resolved to B. Each node is one module; a node with several members is a strongly connected component. Subgraphs are dependency-first layers, so an edge always points down the page.
 

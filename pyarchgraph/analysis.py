@@ -16,6 +16,7 @@ from pyarchgraph.model import (
     View,
 )
 from pyarchgraph.projection import build_package_dag
+from pyarchgraph.quality import calculate_quality
 from pyarchgraph.resolution import resolve_imports
 
 DEFAULT_PACKAGE_DEPTH = 2
@@ -75,9 +76,20 @@ def analyse(
     diagnostics = tuple(
         sorted((*discovery.diagnostics, *collection.diagnostics), key=_diagnostic_key)
     )
+    complete = not any(item.severity is Severity.ERROR for item in diagnostics)
+    quality = calculate_quality(
+        discovery.modules,
+        resolution.dependencies,
+        complete=complete,
+        unresolved_import_count=len(resolution.unresolved_imports),
+        dynamic_import_warning_count=sum(
+            item.severity is Severity.WARNING and item.code == "dynamic_import_ignored"
+            for item in diagnostics
+        ),
+    )
 
     return AnalysisResult(
-        complete=not any(item.severity is Severity.ERROR for item in diagnostics),
+        complete=complete,
         python_version=(
             f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
         ),
@@ -92,4 +104,5 @@ def analyse(
         unresolved_imports=resolution.unresolved_imports,
         dag=dag,
         diagnostics=diagnostics,
+        quality=quality,
     )

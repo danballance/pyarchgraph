@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 
 class Severity(str, Enum):
@@ -212,6 +212,48 @@ class Dag:
 
 
 @dataclass(frozen=True, slots=True)
+class ArchitectureMetrics:
+    """Module-level counts and fractions before projection or condensation.
+
+    Active modules have an incoming or outgoing internal dependency, including
+    self-imports. Reachability counts ordered pairs of distinct modules. Fan-in
+    and fan-out count distinct dependency edges, including self-imports.
+    """
+
+    module_count: int
+    active_module_count: int
+    isolated_module_count: int
+    dependency_count: int
+    cyclic_component_count: int
+    cyclic_module_count: int
+    largest_cycle_size: int
+    reachable_pair_count: int
+    max_fan_in: int
+    max_fan_out: int
+    cycle_fraction: float
+    reach_fraction: float
+
+
+@dataclass(frozen=True, slots=True)
+class ArchitectureQuality:
+    """An experimental structural score, with its inputs and limitations.
+
+    Scores are absent for empty or incomplete analyses. Metrics from an
+    incomplete analysis describe only the observed partial graph. Unresolved
+    and dynamic imports do not change completeness or invent graph edges.
+    """
+
+    formula_version: str
+    score: float | None
+    cycle_avoidance_score: float | None
+    dependency_isolation_score: float | None
+    unavailable_reason: Literal["incomplete_analysis", "no_modules"] | None
+    metrics: ArchitectureMetrics
+    unresolved_import_count: int
+    dynamic_import_warning_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class AnalysisResult:
     """One analysis, its provenance, and the graph derived from it.
 
@@ -235,3 +277,4 @@ class AnalysisResult:
     unresolved_imports: tuple[UnresolvedImport, ...]
     dag: Dag
     diagnostics: tuple[Diagnostic, ...]
+    quality: ArchitectureQuality

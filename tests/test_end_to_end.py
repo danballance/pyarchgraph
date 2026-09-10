@@ -241,9 +241,10 @@ raise RuntimeError("target code must never execute")
     document = json.loads(json_bytes)
     markdown = markdown_bytes.decode("utf-8")
 
-    # The public JSON boundary has the complete declared v0.1 shape.
+    # The public JSON boundary has the complete declared v0.2 shape.
     assert set(document) == {
         "schema_version",
+        "quality",
         "semantics",
         "analysis",
         "modules",
@@ -254,7 +255,11 @@ raise RuntimeError("target code must never execute")
         "dag",
         "diagnostics",
     }
-    assert document["schema_version"] == "0.1"
+    assert document["schema_version"] == "0.2"
+    assert document["quality"]["score"] is None
+    assert document["quality"]["unavailable_reason"] == "incomplete_analysis"
+    assert document["quality"]["metrics"]["module_count"] == 22
+    assert document["quality"]["dynamic_import_warning_count"] == 4
     assert document["semantics"] == {
         "dynamic_imports": "diagnosed_not_resolved",
         "edge_direction": "importer_to_imported",

@@ -17,6 +17,7 @@ from pyarchgraph.rendering import (
     ImpliedEdges,
     render_json,
     render_mermaid_markdown,
+    render_quality_summary,
 )
 
 
@@ -201,6 +202,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{cyclic_count} cyclic components, "
         f"{len(result.diagnostics)} diagnostics; "
         f"wrote {json_path} and {mermaid_path}",
+        file=sys.stderr,
+    )
+    print(
+        f"pyarchgraph: {render_quality_summary(result.quality)}; "
+        f"{result.quality.unresolved_import_count} unresolved import records, "
+        f"{result.quality.dynamic_import_warning_count} dynamic-import warnings",
         file=sys.stderr,
     )
     return 0 if result.complete else 1
