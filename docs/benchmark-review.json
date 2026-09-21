@@ -1,0 +1,108 @@
+{
+  "recorded_on": "2026-09-21",
+  "python_version": "3.14.2",
+  "platform": "Linux-6.18.35-x86_64-with-glibc2.42",
+  "notes": [
+    "Wall-clock measurements on a shared development machine; not isolated performance guarantees.",
+    "Prefix digests are SHA-256 of the decimal integers 0 through count minus one.",
+    "Prefix before/after timings are single samples from the reviewed and replacement helper respectively.",
+    "CLI timings include subprocess startup and writing output, excluding fixture creation and output validation.",
+    "Both CLI modes use the updated analyser; these are not full-CLI before/after measurements.",
+    "The cli mode comparison was captured during implementation; final_json_only_validation was rerun after all product fixes and records the final analyser identity."
+  ],
+  "prefix_before_after": [
+    {
+      "digests": 1000,
+      "quadratic_seconds": 0.565376,
+      "sorted_neighbours_seconds": 0.00405
+    },
+    {
+      "digests": 2000,
+      "quadratic_seconds": 2.148216,
+      "sorted_neighbours_seconds": 0.006987
+    },
+    {
+      "digests": 4000,
+      "quadratic_seconds": 10.918375,
+      "sorted_neighbours_seconds": 0.029298
+    },
+    {
+      "digests": 8000,
+      "quadratic_seconds": 37.706427,
+      "sorted_neighbours_seconds": 0.042382
+    }
+  ],
+  "cli": [
+    {
+      "command": ".venv/bin/python tests/benchmark_pipeline.py --modules 2000 --repeats 3",
+      "case": "layered",
+      "modules": 2000,
+      "imports": 9323,
+      "dependencies": 9323,
+      "score": 85.0,
+      "json_only": true,
+      "cli_seconds": [
+        4.82897,
+        5.212485,
+        5.572186
+      ],
+      "median_cli_seconds": 5.212485,
+      "peak_cli_process_mib": 116.8
+    },
+    {
+      "command": ".venv/bin/python tests/benchmark_pipeline.py --modules 2000 --repeats 3 --with-diagram",
+      "case": "layered",
+      "modules": 2000,
+      "imports": 9323,
+      "dependencies": 9323,
+      "score": 85.0,
+      "json_only": false,
+      "cli_seconds": [
+        14.066671,
+        10.568753,
+        11.026268
+      ],
+      "median_cli_seconds": 11.026268,
+      "peak_cli_process_mib": 162.6
+    }
+  ],
+  "final_json_only_validation": {
+    "case": "layered",
+    "modules": 2000,
+    "imports": 9323,
+    "dependencies": 9323,
+    "score": 85.0,
+    "json_only": true,
+    "cli_seconds": [
+      6.032866,
+      4.647948,
+      4.487964
+    ],
+    "median_cli_seconds": 4.647948,
+    "peak_cli_process_mib": 117.0,
+    "prefix_timings": [
+      {
+        "digests": 1000,
+        "sorted_neighbours_seconds": 0.001906
+      },
+      {
+        "digests": 2000,
+        "sorted_neighbours_seconds": 0.00735
+      },
+      {
+        "digests": 4000,
+        "sorted_neighbours_seconds": 0.008916
+      },
+      {
+        "digests": 8000,
+        "sorted_neighbours_seconds": 0.023513
+      }
+    ],
+    "command": ".venv/bin/python tests/benchmark_pipeline.py --modules 2000 --repeats 3",
+    "analyser": {
+      "version": "0.3.0",
+      "commit": "925276dbedbc324427a619aab91a35a719e8e183",
+      "source_digest": "df07008c84b21968239561220304ee5cebb59eaf1d2a0de509da78e87e166d81"
+    }
+  }
+}
