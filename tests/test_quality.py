@@ -206,7 +206,7 @@ def test_analysis_scores_raw_graph_in_every_view_and_edge_style(tmp_path: Path) 
             assert markdown == render_mermaid_markdown(result, implied_edges=style)
 
 
-def test_type_only_local_and_probable_imports_keep_existing_semantics(
+def test_type_only_local_and_probable_imports_are_structural_dependencies(
     tmp_path: Path,
 ) -> None:
     package = tmp_path / "pkg"
@@ -218,8 +218,9 @@ def test_type_only_local_and_probable_imports_keep_existing_semantics(
     (package / "b.py").write_text("def lazy():\n    import pkg.a\n")
     result = analyse(tmp_path)
     assert result.quality.metrics.cyclic_module_count == 2
-    assert result.quality.metrics.dependency_count == 3
-    assert result.quality.metrics.active_module_count == 3
+    assert result.quality.metrics.dependency_count == 2
+    assert len(result.dependencies) == 3  # Raw base observation remains available.
+    assert result.quality.metrics.active_module_count == 2
     original_quality = result.quality
     with (package / "b.py").open("a") as handle:
         handle.write("    import pkg.a\n")

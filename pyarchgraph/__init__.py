@@ -2,6 +2,7 @@
 
 from pyarchgraph.analysis import analyse
 from pyarchgraph.extraction import AstImportFactSource
+from pyarchgraph.policy import GraphPolicy
 from pyarchgraph.model import (
     AnalysisResult,
     ArchitectureMetrics,
@@ -11,6 +12,7 @@ from pyarchgraph.model import (
 from pyarchgraph.rendering import render_json, render_mermaid_markdown
 
 __all__ = [
+    "GraphPolicy",
     "AnalysisResult",
     "ArchitectureMetrics",
     "ArchitectureQuality",

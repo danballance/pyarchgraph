@@ -3,12 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import random
 
 import pytest
 
 from pyarchgraph import extraction
+from pyarchgraph.analysis import analyse
 from pyarchgraph.extraction import AstImportFactSource
 from pyarchgraph.model import ImportScope, ImportSyntax, Severity, SourceModule
+from pyarchgraph.policy import GraphPolicy
+from pyarchgraph.findings import check_status
 
 
 def _module(
@@ -121,7 +125,7 @@ from typing import TYPE_CHECKING as LATE
     assert facts["local_runtime"].scope is ImportScope.LOCAL
 
 
-def test_only_direct_dynamic_import_callee_forms_are_diagnosed(
+def test_dynamic_literals_keep_source_evidence_and_nonliteral_calls_warn(
     tmp_path: Path,
 ) -> None:
     source = """import importlib
@@ -129,7 +133,7 @@ __import__("literal")
 __import__(computed)
 importlib.import_module("direct")
 load = importlib.import_module
-load("alias-is-ignored")
+load("assigned_alias")
 other.import_module("also-ignored")
 """
     path = tmp_path / "mod.py"
@@ -141,10 +145,223 @@ other.import_module("also-ignored")
         ("dynamic_import_ignored", 2, 0),
         ("dynamic_import_ignored", 3, 0),
         ("dynamic_import_ignored", 4, 0),
+        ("dynamic_import_ignored", 6, 0),
     ]
     assert all(item.severity is Severity.WARNING for item in result.diagnostics)
-    assert len(result.facts) == 1
+    assert len(result.facts) == 4
     assert result.facts[0].base_module == "importlib"
+    assert [fact.base_module for fact in result.facts[1:]] == [
+        "literal",
+        "direct",
+        "assigned_alias",
+    ]
+    assert all(fact.syntax is ImportSyntax.DYNAMIC_IMPORT for fact in result.facts[1:])
+    assert result.facts[1].source_segment == '__import__("literal")'
+    assert result.facts[1].line == 2
+    assert result.facts[1].bound_name == ""
+
+
+def test_importlib_aliases_and_relative_literal_targets(tmp_path: Path) -> None:
+    (tmp_path / "mod.py").write_text(
+        """import importlib as loader
+from importlib import import_module as load
+loader.import_module("pkg.first")
+load(name="pkg.second")
+load(".child", package="pkg")
+load("..sibling", "pkg.child")
+load(variable)
+load(".unknown", package=variable)
+__import__("relative", globals(), locals(), (), 1)
+""",
+        encoding="utf-8",
+    )
+
+    result = AstImportFactSource().collect(tmp_path, (_module("mod", "mod.py"),))
+
+    dynamic = [
+        fact for fact in result.facts if fact.syntax is ImportSyntax.DYNAMIC_IMPORT
+    ]
+    assert [fact.base_module for fact in dynamic] == [
+        "pkg.first",
+        "pkg.second",
+        "pkg.child",
+        "pkg.sibling",
+    ]
+    assert [item.line for item in result.diagnostics] == list(range(3, 10))
+
+
+def test_dynamic_aliases_respect_parameters_rebinding_and_local_names(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "mod.py").write_text(
+        """import importlib as loader
+from importlib import import_module as load
+def parameter(load, loader, __import__):
+    load("not-an-import")
+    loader.import_module("not-an-import")
+    __import__("not-an-import")
+def local_binding():
+    load("unbound-local")
+    load = custom_loader
+def local_alias():
+    from importlib import import_module as local_load
+    local_load("pkg.local")
+load("pkg.module")
+load = custom_loader
+load("not-an-import")
+loader = custom_loader
+loader.import_module("not-an-import")
+__import__ = custom_loader
+__import__("not-an-import")
+""",
+        encoding="utf-8",
+    )
+
+    result = AstImportFactSource().collect(tmp_path, (_module("mod", "mod.py"),))
+
+    assert [item.line for item in result.diagnostics] == [12, 13]
+    dynamic = [
+        fact for fact in result.facts if fact.syntax is ImportSyntax.DYNAMIC_IMPORT
+    ]
+    assert [(fact.base_module, fact.scope) for fact in dynamic] == [
+        ("pkg.local", ImportScope.LOCAL),
+        ("pkg.module", ImportScope.MODULE),
+    ]
+
+
+def test_dynamic_aliases_keep_typing_only_context(tmp_path: Path) -> None:
+    (tmp_path / "mod.py").write_text(
+        """from typing import TYPE_CHECKING
+from importlib import import_module as load
+if TYPE_CHECKING:
+    load("pkg.typing_only")
+""",
+        encoding="utf-8",
+    )
+    result = AstImportFactSource().collect(tmp_path, (_module("mod", "mod.py"),))
+    assert result.facts[-1].type_only is True
+    assert result.facts[-1].syntax is ImportSyntax.DYNAMIC_IMPORT
+
+
+def test_dynamic_aliases_respect_lambda_comprehension_and_class_scopes(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "mod.py").write_text(
+        """from importlib import import_module as load
+lambda load: load("shadowed")
+[load("shadowed") for load in callbacks]
+load("pkg.after_comprehension")
+class Example:
+    load = custom_loader
+    def method(self):
+        load("pkg.from_module")
+try:
+    pass
+except Exception as load:
+    load("shadowed")
+""",
+        encoding="utf-8",
+    )
+    result = AstImportFactSource().collect(tmp_path, (_module("mod", "mod.py"),))
+    dynamic = [
+        fact for fact in result.facts if fact.syntax is ImportSyntax.DYNAMIC_IMPORT
+    ]
+    assert [fact.base_module for fact in dynamic] == [
+        "pkg.after_comprehension",
+        "pkg.from_module",
+    ]
+    assert [item.line for item in result.diagnostics] == [4, 8]
+
+
+def test_assignment_aliases_are_followed_until_rebound(tmp_path: Path) -> None:
+    (tmp_path / "mod.py").write_text(
+        """import importlib.util
+load = importlib.import_module
+copied: object = load
+copied("pkg.first")
+load = load("pkg.second")
+load("not_a_loader")
+copy_builtin = __import__
+copy_builtin("pkg.third")
+""",
+        encoding="utf-8",
+    )
+    result = AstImportFactSource().collect(tmp_path, (_module("mod", "mod.py"),))
+    assert [item.line for item in result.diagnostics] == [4, 5, 8]
+    dynamic = [
+        fact for fact in result.facts if fact.syntax is ImportSyntax.DYNAMIC_IMPORT
+    ]
+    assert [fact.base_module for fact in dynamic] == [
+        "pkg.first",
+        "pkg.second",
+        "pkg.third",
+    ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'from importlib import import_module as load\nfor load in load("b"):\n    pass\n',
+        "import importlib as loader\nclass C:\n    loader = object()\n"
+        '    result = [loader.import_module("b") for _ in [1]]\n',
+        'from importlib import import_module as load\nclass load:\n    result = load("b")\n',
+    ],
+)
+def test_dynamic_aliases_use_runtime_binding_order_and_class_comprehension_scope(
+    tmp_path: Path, source: str
+) -> None:
+    (tmp_path / "a.py").write_text(source, encoding="utf-8")
+    (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
+
+    result = analyse(tmp_path)
+
+    assert check_status(result) == "needs_review"
+    dynamic = [
+        fact
+        for fact in result.import_facts
+        if fact.syntax is ImportSyntax.DYNAMIC_IMPORT
+    ]
+    assert [fact.base_module for fact in dynamic] == ["b"]
+    assert result.findings[0]["certainty"] == "possible"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from typing import TYPE_CHECKING as TC\nTC = True\nif TC:\n    import b\n",
+        "import typing as t\nt = object()\nif t.TYPE_CHECKING:\n    import b\n",
+        "from typing import TYPE_CHECKING as TC\ndef f(TC):\n    if TC:\n        import b\n",
+    ],
+)
+def test_rebound_typing_guards_cannot_hide_cycles_under_typing_exclusion(
+    tmp_path: Path, source: str
+) -> None:
+    (tmp_path / "a.py").write_text(source, encoding="utf-8")
+    (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
+
+    result = analyse(tmp_path, policy=GraphPolicy(include_type_only=False))
+
+    assert check_status(result) == "fail"
+    assert not next(
+        fact for fact in result.import_facts if fact.base_module == "b"
+    ).type_only
+
+
+def test_simple_assigned_typing_alias_keeps_type_only_classification(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a.py").write_text(
+        "from typing import TYPE_CHECKING\nTC = TYPE_CHECKING\nif TC:\n    import b\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
+
+    result = analyse(tmp_path, policy=GraphPolicy(include_type_only=False))
+
+    assert check_status(result) == "pass"
+    assert next(
+        fact for fact in result.import_facts if fact.base_module == "b"
+    ).type_only
 
 
 def test_read_decode_and_parse_failures_are_stable_and_do_not_stop_collection(
@@ -254,3 +471,61 @@ def test_full_fact_digest_collision_is_rejected(
 
     with pytest.raises(ValueError, match="unique full SHA-256"):
         AstImportFactSource().collect(tmp_path, (_module("mod", "mod.py"),))
+
+
+def test_prefix_lengths_match_pairwise_reference_for_collisions_and_duplicates() -> (
+    None
+):
+    rng = random.Random(420)
+    digests = [hashlib.sha256(str(index).encode()).hexdigest() for index in range(150)]
+    digests.extend(["a" * 12 + "0" * 52, "a" * 12 + "1" * 52, "a" * 63 + "b", "a" * 64])
+    digests.extend(digests[:3])
+    rng.shuffle(digests)
+
+    expected = []
+    for digest in digests:
+        length = 12
+        while any(
+            other != digest and other.startswith(digest[:length]) for other in digests
+        ):
+            length += 1
+        expected.append(length)
+
+    assert extraction._minimum_unique_prefix_lengths(tuple(digests)) == tuple(expected)
+    assert extraction._minimum_unique_prefix_lengths(()) == ()
+    assert extraction._minimum_unique_prefix_lengths(("f" * 64,)) == (12,)
+
+
+def test_raw_collection_has_same_evidence_without_assigning_ids(tmp_path: Path) -> None:
+    (tmp_path / "mod.py").write_text("import a, b\n", encoding="utf-8")
+    collector = AstImportFactSource()
+    modules = (_module("mod", "mod.py"),)
+
+    raw = collector.collect_uncanonicalised(tmp_path, modules)
+    canonical = collector.collect(tmp_path, modules)
+
+    assert [fact.id for fact in raw.facts] == ["", ""]
+    assert extraction.canonicalise_fact_ids(raw.facts) == canonical.facts
+    assert raw.diagnostics == canonical.diagnostics
+
+
+def test_default_analysis_assigns_fact_ids_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "a.py").write_text("import b\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("VALUE = 1\n", encoding="utf-8")
+    original = extraction._assign_fact_ids
+    calls = []
+
+    def recording_assign(facts):
+        collected = tuple(facts)
+        calls.append(collected)
+        return original(collected)
+
+    monkeypatch.setattr(extraction, "_assign_fact_ids", recording_assign)
+    result = analyse(tmp_path)
+
+    assert len(calls) == 1
+    assert len(calls[0]) == 1
+    assert calls[0][0].id == ""
+    assert result.import_facts[0].id.startswith("fact-")

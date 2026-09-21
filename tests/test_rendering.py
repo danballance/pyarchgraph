@@ -135,13 +135,15 @@ def test_render_json_emits_complete_contract_and_canonical_order() -> None:
 
     assert rendered.endswith("\n") and not rendered.endswith("\n\n")
     assert render_json(result) == rendered
-    assert payload["schema_version"] == "0.2"
+    assert payload["schema_version"] == "0.3"
     assert payload["quality"]["score"] == 85.0
     assert payload["quality"]["formula_version"] == "architecture-v1"
     assert payload["quality"]["unresolved_import_count"] == 1
     assert payload["quality"]["dynamic_import_warning_count"] == 1
     assert payload["semantics"] == {
-        "dynamic_imports": "diagnosed_not_resolved",
+        "dynamic_imports": "recognized_calls_diagnosed_literal_targets_uncertain",
+        "architecture_graph": "structural-v1; normalized submodule bases; evidence filters",
+        "dag_graph": "architecture_dependencies",
         "edge_direction": "importer_to_imported",
         "edge_kind": "syntactic_import",
         "implicit_parent_package_imports": False,
@@ -150,6 +152,9 @@ def test_render_json_emits_complete_contract_and_canonical_order() -> None:
     }
     assert payload["analysis"] == {
         "complete": True,
+        "scope_valid": True,
+        "dependency_resolution_complete": True,
+        "provenance": None,
         "excludes": [],
         "namespace_prefixes": ["alpha", "zeta"],
         "python_version": "3.14.7",
@@ -243,7 +248,7 @@ Generated file.
 
 **Architecture score: unavailable (no modules) (experimental, architecture-v1)**
 
-The score uses raw module dependencies in every diagram view. Higher is better under this heuristic; isolated modules do not affect it.
+The score uses structural module dependencies in every diagram view. Connected additions can dilute a cycle penalty; use the policy findings for checks.
 
 | Metric | Value |
 | --- | --- |
@@ -251,13 +256,16 @@ The score uses raw module dependencies in every diagram view. Higher is better u
 | Dependency isolation (30%) | unavailable |
 | Modules: total / active / isolated | 0 / 0 / 0 |
 | Internal dependencies | 0 |
-| Cyclic components / cyclic modules / largest cycle | 0 / 0 / 0 |
+| Cyclic components / cyclic modules / largest cyclic component | 0 / 0 / 0 |
 | Reachable ordered pairs (excluding self) | 0 |
 | Maximum fan-in / fan-out | 0 / 0 |
 | Unresolved import records | 0 |
 | Dynamic-import warnings | 0 |
 
 Compare runs with the same source root, exclusions and analyser/formula versions. This experimental score measures dependency structure, not overall code quality.
+
+Policy check: **needs_review**. Definite and possible findings are separate from the score.
+
 
 Legend: `A -> B` means A contains an import statically resolved to B. Each node is one module; a node with several members is a strongly connected component. Subgraphs are dependency-first layers, so an edge always points down the page.
 

@@ -100,7 +100,7 @@ def calculate_quality(
         dependency_count=len(pairs),
         cyclic_component_count=len(cyclic_components),
         cyclic_module_count=cyclic_count,
-        largest_cycle_size=max(
+        largest_cyclic_component_size=max(
             (len(members) for members in cyclic_components), default=0
         ),
         reachable_pair_count=reachable_count,

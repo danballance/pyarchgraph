@@ -1,12 +1,65 @@
 {
   "analysis": {
     "complete": true,
-    "excludes": [],
+    "dependency_resolution_complete": true,
+    "excludes": [
+      "*_test.py",
+      "test_*.py",
+      "tests"
+    ],
     "namespace_prefixes": [],
+    "provenance": {
+      "analyser": {
+        "commit": "NORMALIZED",
+        "source_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "version": "NORMALIZED"
+      },
+      "default_excluded_directories": [
+        ".git",
+        ".venv",
+        "__pycache__",
+        "build",
+        "dist",
+        "venv"
+      ],
+      "excludes": [
+        "*_test.py",
+        "test_*.py",
+        "tests"
+      ],
+      "expected_packages": [],
+      "fact_source": "pyarchgraph.extraction.AstImportFactSource",
+      "forbidden_dependencies": [],
+      "formula_version": "architecture-v1",
+      "graph_policy": {
+        "include_local": true,
+        "include_tests": false,
+        "include_type_only": true
+      },
+      "graph_policy_version": "structural-v1",
+      "python_version": "NORMALIZED",
+      "source_root": "."
+    },
     "python_version": "NORMALIZED",
+    "scope_valid": true,
     "view": {
       "kind": "module"
     }
+  },
+  "architecture_dependencies": [
+    {
+      "evidence": [
+        {
+          "fact_id": "fact-1e4e1e2c5468",
+          "resolution_kind": "exact_module"
+        }
+      ],
+      "source": "a",
+      "target": "b"
+    }
+  ],
+  "check": {
+    "status": "pass"
   },
   "dag": {
     "dependency_first_layers": [
@@ -60,6 +113,7 @@
   ],
   "diagnostics": [],
   "external_imports": [],
+  "findings": [],
   "import_facts": [
     {
       "alias_index": 0,
@@ -80,6 +134,11 @@
       "syntax": "import",
       "type_only": false
     }
+  ],
+  "limitations": [
+    "Static analysis does not prove runtime initialization or the absence of dynamic imports.",
+    "The heuristic score is not a policy threshold; connected additions can dilute it.",
+    "No expected package names were supplied; source-root validation is heuristic."
   ],
   "modules": [
     {
@@ -107,7 +166,7 @@
       "cyclic_module_count": 0,
       "dependency_count": 1,
       "isolated_module_count": 0,
-      "largest_cycle_size": 0,
+      "largest_cyclic_component_size": 0,
       "max_fan_in": 1,
       "max_fan_out": 1,
       "module_count": 2,
@@ -118,9 +177,11 @@
     "unavailable_reason": null,
     "unresolved_import_count": 0
   },
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "semantics": {
-    "dynamic_imports": "diagnosed_not_resolved",
+    "architecture_graph": "structural-v1; normalized submodule bases; evidence filters",
+    "dag_graph": "architecture_dependencies",
+    "dynamic_imports": "recognized_calls_diagnosed_literal_targets_uncertain",
     "edge_direction": "importer_to_imported",
     "edge_kind": "syntactic_import",
     "implicit_parent_package_imports": false,
