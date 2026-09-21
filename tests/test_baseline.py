@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from pyarchgraph.analysis import analyse
+from pyarchgraph.findings import build_findings
 from pyarchgraph import provenance
 from pyarchgraph.provenance import compare_baseline
 from pyarchgraph.rendering import render_json
@@ -296,6 +297,38 @@ def test_missing_forbidden_finding_cannot_silently_clear_a_baseline(
 
     with pytest.raises(ValueError, match="forbidden dependencies do not match graph"):
         compare_baseline(current, baseline)
+
+
+@pytest.mark.parametrize(
+    "rules",
+    [
+        (("a", "b"), ("a", "b")),
+        (("a", "b"), ("*", "b")),
+        (("a", "b"), ("*", "b"), ("a", "b")),
+    ],
+)
+def test_equivalent_forbidden_rules_have_identical_json_and_compatible_baselines(
+    tmp_path: Path, rules: tuple[tuple[str, str], ...]
+) -> None:
+    _write(tmp_path, {"a.py": "import b\n", "b.py": ""})
+    canonical = tuple(sorted(set(rules)))
+    expected = render_json(analyse(tmp_path, forbidden_dependencies=canonical))
+    actual = render_json(analyse(tmp_path, forbidden_dependencies=rules))
+
+    assert actual == expected
+    assert compare_baseline(json.loads(actual), json.loads(actual))["compatible"]
+    assert compare_baseline(json.loads(actual), json.loads(expected))["compatible"]
+    assert compare_baseline(json.loads(expected), json.loads(actual))["compatible"]
+
+
+def test_standalone_findings_canonicalise_forbidden_rules(tmp_path: Path) -> None:
+    _write(tmp_path, {"a.py": "import b\n", "b.py": ""})
+    result = analyse(tmp_path)
+    rules = (("a", "b"), ("*", "b"), ("a", "b"))
+
+    findings = build_findings(result.architecture_dependencies, result.import_facts, rules)
+
+    assert findings[0]["rules"] == [["*", "b"], ["a", "b"]]
 
 
 def test_analyser_digest_detects_source_edits_without_version_or_commit_changes(

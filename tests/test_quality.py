@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from fractions import Fraction
 import json
 from pathlib import Path
 import random
@@ -174,6 +175,56 @@ def test_reachability_matches_independent_networkx_traversals() -> None:
             len(nx.descendants(graph, node)) for node in graph
         )
         assert quality.score is None or 0 <= quality.score <= 100
+
+
+def test_disconnected_structures_share_global_score_denominators() -> None:
+    # A chain, diamond, SCC with a tail, self-loop, pair, and isolated module.
+    pairs = (
+        ("a", "b"),
+        ("b", "c"),
+        ("d", "e"),
+        ("d", "f"),
+        ("e", "g"),
+        ("f", "g"),
+        ("h", "i"),
+        ("i", "h"),
+        ("i", "j"),
+        ("k", "k"),
+        ("l", "m"),
+    )
+    quality = _quality("abcdefghijklmn", pairs)
+    assert quality.metrics.module_count == 14
+    assert quality.metrics.active_module_count == 13
+    assert quality.metrics.isolated_module_count == 1
+    assert quality.metrics.cyclic_module_count == 3
+    assert quality.metrics.cyclic_component_count == 2
+    assert quality.metrics.reachable_pair_count == 13
+    assert quality.metrics.reach_fraction == float(Fraction(13, 13 * 12))
+    assert quality.metrics.cycle_fraction == float(Fraction(3, 13))
+    assert quality.score == float(
+        100
+        * (
+            Fraction(70, 100) * Fraction(10, 13)
+            + Fraction(30, 100) * Fraction(11, 12)
+        )
+    )
+    assert quality == _quality("nmlkjihgfedcba", tuple(reversed(pairs)))
+
+
+def test_disconnected_pairs_preserve_exact_reachability_and_score() -> None:
+    count = 1000
+    names = tuple(f"module{index:04d}" for index in range(count))
+    quality = calculate_quality(
+        tuple(SourceModule(name, f"{name}.py", False, None) for name in names),
+        tuple(DependencyEdge(names[i], names[i + 1], ()) for i in range(0, count, 2)),
+        complete=True,
+    )
+    assert quality.metrics.active_module_count == count
+    assert quality.metrics.reachable_pair_count == count // 2
+    assert quality.metrics.cyclic_module_count == 0
+    reach_fraction = Fraction(count // 2, count * (count - 1))
+    assert quality.metrics.reach_fraction == float(reach_fraction)
+    assert quality.score == float(100 - 30 * reach_fraction)
 
 
 def test_unknown_endpoints_and_duplicate_module_ids_are_rejected() -> None:

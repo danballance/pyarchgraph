@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import suppress
 import json
 import os
 import sys
@@ -163,6 +164,7 @@ def _format_diagnostic(diagnostic: Diagnostic) -> str:
 def _stage_write(path: Path, content: str) -> Path:
     """Durably stage one artifact beside its final destination."""
 
+    temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -173,14 +175,16 @@ def _stage_write(path: Path, content: str) -> Path:
             suffix=".tmp",
             delete=False,
         ) as handle:
+            temporary = Path(handle.name)
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-            temporary = Path(handle.name)
         return temporary
     except BaseException:
-        if "temporary" in locals():
-            temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            # Cleanup is best effort and must not replace the staging error.
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
         raise
 
 
@@ -204,7 +208,8 @@ def _write_outputs_atomically(
             staged.pop(0)
     finally:
         for temporary in staged:
-            temporary.unlink(missing_ok=True)
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

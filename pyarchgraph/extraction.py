@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import tokenize
+import stat
 from typing import Iterable
 
 from pyarchgraph.model import (
@@ -148,74 +149,363 @@ def _syntax_error_column(error: SyntaxError) -> int | None:
     return max(error.offset - 1, 0)
 
 
-class _LocalBindings(ast.NodeVisitor):
-    """Find names that shadow outer aliases throughout a function body."""
+# Unknown is an explicit alternative: unions retain possible loaders, while only
+# singleton typing aliases can justify excluding an import from the graph.
+_UNKNOWN = frozenset({"unknown"})
+_Aliases = dict[str, frozenset[str]]
 
-    def __init__(self) -> None:
-        self.names: set[str] = set()
-        self.outer_names: set[str] = set()
 
-    def visit_Name(self, node: ast.Name) -> None:  # noqa: N802
-        if isinstance(node.ctx, (ast.Store, ast.Del)):
-            self.names.add(node.id)
+def _merge_aliases(*paths: _Aliases) -> _Aliases:
+    return {
+        name: frozenset().union(*(path.get(name, _UNKNOWN) for path in paths))
+        for name in set().union(*paths)
+    }
 
-    def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
-        self.names.update(
+
+def _alias_values(expression: ast.expr, aliases: _Aliases) -> frozenset[str]:
+    if isinstance(expression, ast.Name):
+        return aliases.get(expression.id, _UNKNOWN)
+    if isinstance(expression, ast.Attribute) and isinstance(expression.value, ast.Name):
+        return frozenset(
+            "import_module"
+            if kind == "importlib" and expression.attr == "import_module"
+            else "type_checking"
+            if kind == "typing" and expression.attr == "TYPE_CHECKING"
+            else "unknown"
+            for kind in aliases.get(expression.value.id, _UNKNOWN)
+        )
+    return _UNKNOWN
+
+
+def _import_alias(node: ast.Import | ast.ImportFrom, alias: ast.alias) -> str:
+    if isinstance(node, ast.Import):
+        if alias.name == "importlib" or (
+            alias.name.startswith("importlib.") and alias.asname is None
+        ):
+            return "importlib"
+        if alias.name == "typing":
+            return "typing"
+    elif node.level == 0:
+        if node.module == "importlib" and alias.name == "import_module":
+            return "import_module"
+        if node.module == "typing" and alias.name == "TYPE_CHECKING":
+            return "type_checking"
+    return "unknown"
+
+
+def _bound_names(node: ast.AST) -> tuple[str, ...]:
+    """Binding fields shared by lexical discovery and sequential invalidation."""
+    if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        return (node.id,)
+    if isinstance(node, ast.arg):
+        return (node.arg,)
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return (node.name,)
+    if isinstance(node, ast.Import):
+        return tuple(
             alias.asname or alias.name.partition(".")[0] for alias in node.names
         )
+    if isinstance(node, ast.ImportFrom):
+        return tuple(alias.asname or alias.name for alias in node.names)
+    if isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+        return (node.name,) if node.name is not None else ()
+    if isinstance(node, ast.MatchMapping):
+        return (node.rest,) if node.rest is not None else ()
+    # These AST classes first exist on Python 3.12; keep 3.11 importable.
+    if type(node).__name__ in {"TypeVar", "ParamSpec", "TypeVarTuple", "TypeAlias"}:
+        return (node.name,) if isinstance(node.name, str) else _bound_names(node.name)
+    return ()
 
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
-        self.names.update(alias.asname or alias.name for alias in node.names)
+
+def _definition_expressions(node: ast.AST) -> Iterable[ast.AST]:
+    """Expressions executed in the containing scope when a definition is made."""
+    yield from getattr(node, "decorator_list", ())
+    if isinstance(node, ast.ClassDef):
+        yield from node.bases
+        yield from (keyword.value for keyword in node.keywords)
+    elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        yield from node.args.defaults
+        yield from (value for value in node.args.kw_defaults if value is not None)
+
+
+def _arguments(node: ast.arguments) -> tuple[ast.arg, ...]:
+    return (
+        *node.posonlyargs,
+        *node.args,
+        *node.kwonlyargs,
+        *((node.vararg,) if node.vararg else ()),
+        *((node.kwarg,) if node.kwarg else ()),
+    )
+
+
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _comprehension_expressions(node: ast.AST) -> Iterable[ast.expr]:
+    for index, generator in enumerate(node.generators):
+        if index:
+            yield generator.iter
+        yield from generator.ifs
+    if isinstance(node, ast.DictComp):
+        yield node.key
+        yield node.value
+    else:
+        yield node.elt
+
+
+class _LocalBindings(ast.NodeVisitor):
+    """One binding inventory for lexical shadowing and deferred alias summaries.
+
+    Summaries union every assignment that can affect a name; they deliberately
+    do not assume a function runs at its definition site or after the last write.
+    Comprehension iteration targets are local, but walrus targets belong here.
+    """
+
+    def __init__(self) -> None:
+        self.writes: dict[str, list[str | ast.expr]] = {}
+        self.globals: set[str] = set()
+        self.nonlocals: set[str] = set()
+        self.definitions: list[ast.AST] = []
+
+    @property
+    def names(self) -> set[str]:
+        return set(self.writes)
+
+    def _record(self, name: str, value: str | ast.expr = "unknown") -> None:
+        self.writes.setdefault(name, []).append(value)
+
+    def generic_visit(self, node: ast.AST) -> None:
+        for name in _bound_names(node):
+            self._record(name)
+        super().generic_visit(node)
+
+    def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+        for name, alias in zip(_bound_names(node), node.names):
+            self._record(name, _import_alias(node, alias))
+
+    visit_ImportFrom = visit_Import
+
+    def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+        self.visit(node.value)
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                self._record(target.id, node.value)
+            else:
+                self.visit(target)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
+        if node.value is not None:
+            self.visit(node.value)
+        if isinstance(node.target, ast.Name):
+            self._record(node.target.id, node.value or "unknown")
+        else:
+            self.visit(node.target)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802
+        self.visit(node.value)
+        self._record(node.target.id, node.value)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
-        self.names.add(node.name)
+        self.definitions.append(node)
+        self._record(node.name)
+        for expression in _definition_expressions(node):
+            self.visit(expression)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            annotations = _LocalBindings()
+            for argument in _arguments(node.args):
+                if argument.annotation is not None:
+                    annotations.visit(argument.annotation)
+            if node.returns is not None:
+                annotations.visit(node.returns)
+            self.definitions.extend(annotations.definitions)
 
     visit_AsyncFunctionDef = visit_FunctionDef
     visit_ClassDef = visit_FunctionDef
 
     def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
-        pass
+        self.definitions.append(node)
+        for expression in _definition_expressions(node):
+            self.visit(expression)
 
     def visit_Global(self, node: ast.Global) -> None:  # noqa: N802
-        self.outer_names.update(node.names)
+        self.globals.update(node.names)
 
-    visit_Nonlocal = visit_Global
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:  # noqa: N802
+        self.nonlocals.update(node.names)
 
-    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:  # noqa: N802
-        if node.name is not None:
-            self.names.add(node.name)
-        self.generic_visit(node)
+    def _visit_comprehension(
+        self, node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
+    ) -> None:
+        self.visit(node.generators[0].iter)
+        self.definitions.append(node)
+        # Only assignment expressions escape to this lexical scope. Nested
+        # lambdas belong to the comprehension and capture its iteration names.
+        bindings = _LocalBindings()
+        for expression in _comprehension_expressions(node):
+            bindings.visit(expression)
+        for name, writes in bindings.writes.items():
+            self.writes.setdefault(name, []).extend(writes)
 
-    def visit_ListComp(self, node: ast.ListComp) -> None:  # noqa: N802
-        # Comprehension targets belong to their own implicit function scope.
-        for generator in node.generators:
-            self.visit(generator.iter)
-            for condition in generator.ifs:
-                self.visit(condition)
-        self.visit(node.elt)
+    visit_ListComp = _visit_comprehension
+    visit_SetComp = _visit_comprehension
+    visit_DictComp = _visit_comprehension
+    visit_GeneratorExp = _visit_comprehension
 
-    visit_SetComp = visit_ListComp
-    visit_GeneratorExp = visit_ListComp
+    def summary(self, inherited: _Aliases) -> _Aliases:
+        # A small monotone dataflow calculation supports chains of assigned
+        # aliases, including forward declarations, without executing expressions.
+        result = inherited.copy()
+        for name in self.writes:
+            result[name] = frozenset()
+        while True:
+            changed = False
+            for name, writes in self.writes.items():
+                values = frozenset().union(
+                    *(
+                        frozenset({value})
+                        if isinstance(value, str)
+                        else _alias_values(value, result)
+                        for value in writes
+                    )
+                )
+                combined = result[name] | values
+                if combined != result[name]:
+                    result[name] = combined
+                    changed = True
+            if not changed:
+                break
+        return {name: values or _UNKNOWN for name, values in result.items()}
 
-    def visit_DictComp(self, node: ast.DictComp) -> None:  # noqa: N802
-        for generator in node.generators:
-            self.visit(generator.iter)
-            for condition in generator.ifs:
-                self.visit(condition)
-        self.visit(node.key)
-        self.visit(node.value)
+
+class _ScopeIndex:
+    """Resolve lexical owners once, including writes through global/nonlocal.
+
+    A redirected write may execute between any two observations. Its possible
+    alias values widen its owner's environment, never establish a typing guard.
+    The finite alias domain makes the summary iteration monotone and bounded.
+    """
+
+    def __init__(self, tree: ast.Module, initial: _Aliases) -> None:
+        self.bindings: dict[ast.AST, _LocalBindings] = {}
+        self.parents: dict[ast.AST, ast.AST | None] = {}
+        self.summaries: dict[ast.AST, _Aliases] = {}
+        self.mutations: dict[ast.AST, _Aliases] = {}
+        self.root = tree
+        self.generator_writes: dict[ast.AST, set[str]] = {}
+        self._add(tree, None)
+        while True:
+            changed = False
+            for node, bindings in self.bindings.items():
+                inherited = initial.copy() if node is tree else self.outer(node)
+                for name in bindings.globals:
+                    inherited[name] = self.summaries.get(tree, {}).get(name, _UNKNOWN)
+                summary = bindings.summary(inherited)
+                if node is tree:
+                    for name, values in initial.items():
+                        summary[name] = summary.get(name, _UNKNOWN) | values
+                for name in bindings.globals | bindings.nonlocals:
+                    summary[name] = summary.get(name, _UNKNOWN) | inherited.get(
+                        name, _UNKNOWN
+                    )
+                for name, values in self.mutations[node].items():
+                    summary[name] = summary.get(name, _UNKNOWN) | values
+                self.summaries[node] = summary
+                redirected = (
+                    bindings.globals
+                    | bindings.nonlocals
+                    | self.generator_writes.get(node, set())
+                )
+                for name in redirected:
+                    if name not in bindings.writes:
+                        continue
+                    if name in self.generator_writes.get(node, set()):
+                        owner = self.parents[node]
+                        while isinstance(owner, _COMPREHENSIONS):
+                            owner = self.parents[owner]
+                        if name in self.bindings[owner].globals:
+                            owner = tree
+                        elif name in self.bindings[owner].nonlocals:
+                            owner = self._nonlocal_owner(owner, name)
+                    else:
+                        owner = (
+                            tree
+                            if name in bindings.globals
+                            else self._nonlocal_owner(node, name)
+                        )
+                    if owner is None:
+                        continue
+                    values = summary.get(name, _UNKNOWN)
+                    previous = self.mutations[owner].get(name, frozenset())
+                    if not values <= previous:
+                        self.mutations[owner][name] = previous | values
+                        changed = True
+            if not changed:
+                break
+
+    def _add(self, node: ast.AST, parent: ast.AST | None) -> None:
+        bindings = _LocalBindings()
+        if isinstance(node, _COMPREHENSIONS):
+            for expression in _comprehension_expressions(node):
+                bindings.visit(expression)
+            if isinstance(node, ast.GeneratorExp):
+                self.generator_writes[node] = bindings.names.copy()
+            for generator in node.generators:
+                bindings.visit(generator.target)
+        else:
+            body = [node.body] if isinstance(node, ast.Lambda) else node.body
+            for statement in body:
+                bindings.visit(statement)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            for argument in _arguments(node.args):
+                bindings._record(argument.arg)
+        for parameter in getattr(node, "type_params", ()):
+            for name in _bound_names(parameter):
+                bindings._record(name)
+        self.bindings[node] = bindings
+        self.parents[node] = parent
+        self.mutations[node] = {}
+        for child in bindings.definitions:
+            self._add(child, node)
+
+    def outer(self, node: ast.AST) -> _Aliases:
+        parent = self.parents[node]
+        parameters: set[str] = set()
+        while isinstance(parent, ast.ClassDef):
+            for parameter in getattr(parent, "type_params", ()):
+                parameters.update(_bound_names(parameter))
+            parent = self.parents[parent]
+        aliases = self.summaries.get(parent, {}).copy()
+        for name in parameters:
+            aliases[name] = _UNKNOWN
+        return aliases
+
+    def _nonlocal_owner(self, node: ast.AST, name: str) -> ast.AST | None:
+        parent = self.parents[node]
+        while parent is not None and parent is not self.root:
+            bindings = self.bindings[parent]
+            if (
+                not isinstance(parent, ast.ClassDef)
+                and name in bindings.names - bindings.globals - bindings.nonlocals
+            ):
+                return parent
+            parent = self.parents[parent]
+        return None
 
 
 class _ImportVisitor(ast.NodeVisitor):
-    """Collect imports while retaining only the context promised by v0.1."""
+    """Collect source evidence using conservative path and lexical environments."""
 
     def __init__(self, module: SourceModule, source: str) -> None:
         self._module = module
         self._source = source
         self._local_depth = 0
         self._type_only = False
-        self._aliases: dict[str, str] = {"__import__": "__import__"}
-        self._class_outer_aliases: dict[str, str] | None = None
+        self._aliases: _Aliases = {"__import__": frozenset({"__import__"})}
+        self._global_aliases = self._aliases.copy()
+        self._comprehension_writes: list[set[str]] = []
+        self._mutations: _Aliases = {}
+        self._class_outer_mutations: _Aliases | None = None
+        self._class_outer_aliases: _Aliases | None = None
         self.facts: list[ImportFact] = []
         self.diagnostics: list[Diagnostic] = []
 
@@ -273,13 +563,7 @@ class _ImportVisitor(ast.NodeVisitor):
                 )
             )
 
-            self._aliases.pop(bound_name, None)
-            if alias.name == "importlib" or (
-                alias.name.startswith("importlib.") and alias.asname is None
-            ):
-                self._aliases[bound_name] = "importlib"
-            elif alias.name == "typing":
-                self._aliases[bound_name] = "typing"
+            self._aliases[bound_name] = frozenset({_import_alias(node, alias)})
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
         for alias_index, alias in enumerate(node.names):
@@ -297,125 +581,252 @@ class _ImportVisitor(ast.NodeVisitor):
                 )
             )
 
-            self._aliases.pop(bound_name, None)
-            if (
-                node.level == 0
-                and node.module == "importlib"
-                and alias.name == "import_module"
-            ):
-                self._aliases[bound_name] = "import_module"
-            elif (
-                node.level == 0
-                and node.module == "typing"
-                and alias.name == "TYPE_CHECKING"
-            ):
-                self._aliases[bound_name] = "type_checking"
+            self._aliases[bound_name] = frozenset({_import_alias(node, alias)})
 
-    def visit_If(self, node: ast.If) -> None:  # noqa: N802
-        # The test remains outside the guarded body and can itself contain a
-        # dynamic import call that should be diagnosed.
-        self.visit(node.test)
-        recognised_guard = self._is_type_checking_guard(node.test)
-        inherited_type_only = self._type_only
-
-        if recognised_guard:
-            self._type_only = True
+    def visit_Module(self, node: ast.Module) -> None:  # noqa: N802
+        self._index = _ScopeIndex(node, self._aliases)
+        self._global_aliases = self._index.summaries[node]
+        self._mutations = self._index.mutations[node]
         for statement in node.body:
             self.visit(statement)
 
-        self._type_only = inherited_type_only
-        for statement in node.orelse:
+    def _path(self, statements: Iterable[ast.AST], incoming: _Aliases) -> _Aliases:
+        self._aliases = incoming.copy()
+        for statement in statements:
             self.visit(statement)
+        return self._aliases
 
+    def visit_If(self, node: ast.If) -> None:  # noqa: N802
+        self.visit(node.test)
+        guard = self._is_type_checking_guard(node.test)
+        incoming = self._aliases.copy()
+        inherited_type_only = self._type_only
+        self._type_only |= guard
+        body = self._path(node.body, incoming)
         self._type_only = inherited_type_only
+        alternative = self._path(node.orelse, incoming)
+        self._aliases = _merge_aliases(body, alternative)
+
+    def visit_IfExp(self, node: ast.IfExp) -> None:  # noqa: N802
+        self.visit(node.test)
+        incoming = self._aliases.copy()
+        body = self._path([node.body], incoming)
+        alternative = self._path([node.orelse], incoming)
+        self._aliases = _merge_aliases(body, alternative)
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> None:  # noqa: N802
+        exits = []
+        for value in node.values:
+            self.visit(value)
+            exits.append(self._aliases.copy())
+        self._aliases = _merge_aliases(*exits)
 
     def _is_type_checking_guard(self, test: ast.expr) -> bool:
-        return self._known_alias(test) == "type_checking"
+        return self._known_alias(test) == frozenset({"type_checking"})
+
+    def visit_Try(self, node: ast.Try) -> None:  # noqa: N802
+        incoming = self._aliases.copy()
+        # An exception can leave any prefix of the try suite applied.
+        prefixes = [incoming]
+        for statement in node.body:
+            self.visit(statement)
+            prefixes.append(self._aliases.copy())
+        normal = self._path(node.orelse, self._aliases)
+        bindings = _LocalBindings()
+        for statement in node.body:
+            bindings.visit(statement)
+        exceptional = _merge_aliases(*prefixes, bindings.summary(incoming))
+        exits = [normal, exceptional]
+        for handler in node.handlers:
+            handler_exit = self._path([handler], exceptional)
+            exits.append(handler_exit)
+            if isinstance(node, ast.TryStar):
+                # Several except* suites can run for one exception group.
+                exceptional = _merge_aliases(exceptional, handler_exit)
+        self._aliases = self._path(node.finalbody, _merge_aliases(*exits))
+
+    visit_TryStar = visit_Try
+
+    def visit_Match(self, node: ast.Match) -> None:  # noqa: N802
+        self.visit(node.subject)
+        incoming = self._aliases.copy()
+        exits = [incoming]  # Include no match; exhaustiveness is not inferred.
+        for case in node.cases:
+            self._aliases = incoming.copy()
+            self.visit(case.pattern)
+            if case.guard is not None:
+                self.visit(case.guard)
+            incoming = _merge_aliases(incoming, self._aliases)
+            for statement in case.body:
+                self.visit(statement)
+            exits.append(self._aliases)
+        self._aliases = _merge_aliases(*exits)
+
+    def generic_visit(self, node: ast.AST) -> None:
+        for name in _bound_names(node):
+            self._aliases.pop(name, None)
+        super().generic_visit(node)
+
+    def _visit_type_parameters(self, node: ast.AST) -> None:
+        for parameter in getattr(node, "type_params", ()):
+            for name in _bound_names(parameter):
+                self._aliases.pop(name, None)
+            # Bounds/defaults use lazy annotation scopes that this collector
+            # cannot establish. Fail explicitly rather than silently omitting
+            # dynamic calls in those expressions.
+            if any(
+                isinstance(value, ast.AST) for _, value in ast.iter_fields(parameter)
+            ):
+                self.diagnostics.append(
+                    Diagnostic(
+                        severity=Severity.ERROR,
+                        code="unsupported_annotation_scope",
+                        message="Generic parameter bounds and defaults are not analysed.",
+                        path=self._module.path,
+                        line=parameter.lineno,
+                        column=parameter.col_offset,
+                    )
+                )
+
+    def visit_TypeAlias(self, node: ast.AST) -> None:  # noqa: N802
+        self.diagnostics.append(
+            Diagnostic(
+                severity=Severity.ERROR,
+                code="unsupported_annotation_scope",
+                message="Lazy type alias expressions are not analysed.",
+                path=self._module.path,
+                line=node.lineno,
+                column=node.col_offset,
+            )
+        )
+        for name in _bound_names(node):
+            self._aliases.pop(name, None)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
         self._visit_local_namespace(node)
 
-    def visit_AsyncFunctionDef(  # noqa: N802
-        self, node: ast.AsyncFunctionDef
-    ) -> None:
-        self._visit_local_namespace(node)
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
-        self._visit_local_namespace(node)
+    visit_AsyncFunctionDef = visit_FunctionDef
+    visit_ClassDef = visit_FunctionDef
+    visit_Lambda = visit_FunctionDef
 
     def _visit_local_namespace(
-        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
     ) -> None:
-        # Decorators, defaults and class bases are evaluated in the surrounding
-        # namespace; only the body introduces local bindings.
-        for decorator in node.decorator_list:
-            self.visit(decorator)
-        if isinstance(node, ast.ClassDef):
-            for base in node.bases:
-                self.visit(base)
-            for keyword in node.keywords:
-                self.visit(keyword.value)
-        else:
-            self.visit(node.args)
-            if node.returns is not None:
-                self.visit(node.returns)
-        if not isinstance(node, ast.ClassDef):
-            self._aliases.pop(node.name, None)
+        is_class = isinstance(node, ast.ClassDef)
+        # Decorators and function defaults are eager. Generic class bases use
+        # the containing namespace extended by the class's type parameters.
+        for expression in _definition_expressions(node):
+            if is_class and expression not in node.decorator_list:
+                continue
+            self.visit(expression)
+        if is_class:
+            outer_aliases = self._aliases
+            outer_mutations = self._mutations
+            self._aliases = outer_aliases.copy()
+            self._mutations = outer_mutations.copy()
+            for parameter in getattr(node, "type_params", ()):
+                for name in _bound_names(parameter):
+                    self._aliases.pop(name, None)
+                    self._mutations.pop(name, None)
+            for expression in (
+                *node.bases,
+                *(keyword.value for keyword in node.keywords),
+            ):
+                self.visit(expression)
+            # Base-expression walrus writes belong to the containing namespace.
+            for name, values in self._aliases.items():
+                if not any(
+                    name in _bound_names(p) for p in getattr(node, "type_params", ())
+                ):
+                    outer_aliases[name] = values
+            self._aliases = outer_aliases
+            self._mutations = outer_mutations
         inherited_aliases = self._aliases
         inherited_class_outer = self._class_outer_aliases
-        if isinstance(node, ast.ClassDef):
-            self._aliases = inherited_aliases.copy()
-            self._class_outer_aliases = (
+        inherited_class_mutations = self._class_outer_mutations
+        inherited_mutations = self._mutations
+        inherited_comprehension = self._comprehension_writes
+        self._comprehension_writes = []
+        body = [node.body] if isinstance(node, ast.Lambda) else node.body
+        bindings = self._index.bindings[node]
+        if is_class:
+            outer = (
                 inherited_class_outer
                 if inherited_class_outer is not None
                 else inherited_aliases
             )
-        else:
-            # A method's free names skip the class attribute namespace.
-            self._aliases = (
-                inherited_class_outer
-                if inherited_class_outer is not None
-                else inherited_aliases
+            self._aliases = outer.copy()
+            self._class_outer_aliases = outer
+            self._mutations = (
+                inherited_class_mutations
+                if inherited_class_mutations is not None
+                else inherited_mutations
             ).copy()
+            self._class_outer_mutations = self._mutations.copy()
+            # Class locals shadow inherited mutations sequentially below;
+            # methods still use the surrounding non-class lexical summary.
+            for name in bindings.names - bindings.globals - bindings.nonlocals:
+                self._mutations.pop(name, None)
+        else:
+            outer = self._index.outer(node)
+            for name in bindings.globals:
+                outer[name] = self._global_aliases.get(name, _UNKNOWN)
+            self._aliases = outer.copy()
+            self._mutations = self._index.mutations[node].copy()
             self._class_outer_aliases = None
-        if not isinstance(node, ast.ClassDef):
-            bindings = _LocalBindings()
-            for statement in node.body:
-                bindings.visit(statement)
-            for name in bindings.names - bindings.outer_names:
+            self._class_outer_mutations = None
+            # Method annotations see class attributes, while their bodies
+            # skip that namespace. Arguments and body locals never shadow an
+            # annotation's free names.
+            parent = self._index.parents[node]
+            if isinstance(parent, ast.ClassDef):
+                self._aliases = self._index.summaries[parent].copy()
+            self._visit_type_parameters(node)
+            for argument in _arguments(node.args):
+                if argument.annotation is not None:
+                    self.visit(argument.annotation)
+            if getattr(node, "returns", None) is not None:
+                self.visit(node.returns)
+            self._aliases = outer.copy()
+            for name in bindings.names - bindings.globals - bindings.nonlocals:
                 self._aliases.pop(name, None)
-            for argument in (
-                *node.args.posonlyargs,
-                *node.args.args,
-                *node.args.kwonlyargs,
-            ):
-                self._aliases.pop(argument.arg, None)
-            for argument in (node.args.vararg, node.args.kwarg):
-                if argument is not None:
-                    self._aliases.pop(argument.arg, None)
+        if is_class:
+            for name in bindings.globals:
+                self._aliases[name] = self._global_aliases.get(name, _UNKNOWN)
+            self._visit_type_parameters(node)
+        for parameter in getattr(node, "type_params", ()):
+            for name in _bound_names(parameter):
+                self._aliases.pop(name, None)
+                self._mutations.pop(name, None)
         self._local_depth += 1
         try:
-            for statement in node.body:
+            for statement in body:
                 self.visit(statement)
         finally:
             self._local_depth -= 1
             self._aliases = inherited_aliases
             self._class_outer_aliases = inherited_class_outer
-            # Class names are bound only after the class body has executed.
-            if isinstance(node, ast.ClassDef):
-                self._aliases.pop(node.name, None)
-
-    def visit_Name(self, node: ast.Name) -> None:  # noqa: N802
-        if isinstance(node.ctx, (ast.Store, ast.Del)):
-            self._aliases.pop(node.id, None)
+            self._class_outer_mutations = inherited_class_mutations
+            self._mutations = inherited_mutations
+            self._comprehension_writes = inherited_comprehension
+            for name in _bound_names(node):
+                self._aliases.pop(name, None)
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
         self.visit(node.value)
         alias = self._known_alias(node.value)
         for target in node.targets:
             self.visit(target)
-            if alias is not None and isinstance(target, ast.Name):
+            if isinstance(target, ast.Name):
                 self._aliases[target.id] = alias
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:  # noqa: N802
+        # Read the old target before writing it; a loader can occur on the RHS.
+        if not isinstance(node.target, ast.Name):
+            self.visit(node.target)
+        self.visit(node.value)
+        if isinstance(node.target, ast.Name):
+            self._aliases.pop(node.target.id, None)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
         self.visit(node.annotation)
@@ -423,60 +834,55 @@ class _ImportVisitor(ast.NodeVisitor):
             self.visit(node.value)
             alias = self._known_alias(node.value)
             self.visit(node.target)
-            if alias is not None and isinstance(node.target, ast.Name):
+            if isinstance(node.target, ast.Name):
                 self._aliases[node.target.id] = alias
 
     def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802
         self.visit(node.value)
+        alias = self._known_alias(node.value)
         self.visit(node.target)
+        self._aliases[node.target.id] = alias
+        for writes in self._comprehension_writes:
+            writes.add(node.target.id)
 
-    def visit_For(self, node: ast.For) -> None:  # noqa: N802
-        # The iterator expression uses the old binding of the loop target.
-        self.visit(node.iter)
-        self.visit(node.target)
-        for statement in (*node.body, *node.orelse):
+    def _visit_loop(self, node: ast.For | ast.AsyncFor | ast.While) -> None:
+        if not isinstance(node, ast.While):
+            self.visit(node.iter)
+        incoming = self._aliases.copy()
+        # Widen the loop head for subsequent iterations, retaining the initial
+        # state and all writes. This also prevents a later iteration's guard
+        # from being mistaken for an invariant TYPE_CHECKING alias.
+        bindings = _LocalBindings()
+        for statement in node.body:
+            bindings.visit(statement)
+        if not isinstance(node, ast.While):
+            bindings.visit(node.target)
+        self._aliases = _merge_aliases(incoming, bindings.summary(incoming))
+        if isinstance(node, ast.While):
+            self.visit(node.test)
+        else:
+            self.visit(node.target)
+        exits = [incoming, self._aliases.copy()]
+        for statement in node.body:
             self.visit(statement)
+            exits.append(self._aliases.copy())
+        loop_exit = _merge_aliases(*exits)
+        normal_exit = self._path(node.orelse, loop_exit)
+        self._aliases = _merge_aliases(loop_exit, normal_exit)
 
-    visit_AsyncFor = visit_For
+    visit_For = _visit_loop
+    visit_AsyncFor = _visit_loop
+    visit_While = _visit_loop
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:  # noqa: N802
         if node.type is not None:
             self.visit(node.type)
-        if node.name is not None:
-            self._aliases.pop(node.name, None)
+        for name in _bound_names(node):
+            self._aliases.pop(name, None)
         for statement in node.body:
             self.visit(statement)
-
-    def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
-        self.visit(node.args)
-        inherited_aliases = self._aliases
-        inherited_class_outer = self._class_outer_aliases
-        self._aliases = (
-            inherited_class_outer
-            if inherited_class_outer is not None
-            else inherited_aliases
-        ).copy()
-        self._class_outer_aliases = None
-        bindings = _LocalBindings()
-        bindings.visit(node.body)
-        for name in bindings.names:
+        for name in _bound_names(node):
             self._aliases.pop(name, None)
-        for argument in (
-            *node.args.posonlyargs,
-            *node.args.args,
-            *node.args.kwonlyargs,
-        ):
-            self._aliases.pop(argument.arg, None)
-        for argument in (node.args.vararg, node.args.kwarg):
-            if argument is not None:
-                self._aliases.pop(argument.arg, None)
-        self._local_depth += 1
-        try:
-            self.visit(node.body)
-        finally:
-            self._local_depth -= 1
-            self._aliases = inherited_aliases
-            self._class_outer_aliases = inherited_class_outer
 
     def _visit_comprehension(
         self, node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
@@ -484,12 +890,28 @@ class _ImportVisitor(ast.NodeVisitor):
         self.visit(node.generators[0].iter)
         inherited_aliases = self._aliases
         inherited_class_outer = self._class_outer_aliases
-        self._aliases = (
+        inherited_class_mutations = self._class_outer_mutations
+        inherited_mutations = self._mutations
+        outer = (
             inherited_class_outer
             if inherited_class_outer is not None
             else inherited_aliases
-        ).copy()
+        )
+        self._aliases = outer.copy()
+        if isinstance(node, ast.GeneratorExp):
+            self._aliases = self._index.outer(node)
+        bindings = self._index.bindings[node]
+        self._aliases = _merge_aliases(self._aliases, bindings.summary(self._aliases))
+        self._mutations = inherited_mutations.copy()
         self._class_outer_aliases = None
+        self._class_outer_mutations = None
+        for generator in node.generators:
+            targets = _LocalBindings()
+            targets.visit(generator.target)
+            for name in targets.names:
+                self._mutations.pop(name, None)
+        writes: set[str] = set()
+        self._comprehension_writes.append(writes)
         self._local_depth += 1
         try:
             for index, generator in enumerate(node.generators):
@@ -503,10 +925,19 @@ class _ImportVisitor(ast.NodeVisitor):
                 self.visit(node.value)
             else:
                 self.visit(node.elt)
+            outgoing = self._aliases
         finally:
             self._local_depth -= 1
             self._aliases = inherited_aliases
             self._class_outer_aliases = inherited_class_outer
+            self._class_outer_mutations = inherited_class_mutations
+            self._mutations = inherited_mutations
+            self._comprehension_writes.pop()
+        # Zero iterations and unconsumed generators remain alternatives.
+        for name in writes:
+            self._aliases[name] = self._aliases.get(name, _UNKNOWN) | outgoing.get(
+                name, _UNKNOWN
+            )
 
     visit_ListComp = _visit_comprehension
     visit_SetComp = _visit_comprehension
@@ -549,23 +980,24 @@ class _ImportVisitor(ast.NodeVisitor):
             return None
         return target
 
-    def _known_alias(self, expression: ast.expr) -> str | None:
-        if isinstance(expression, ast.Name):
-            return self._aliases.get(expression.id)
-        if isinstance(expression, ast.Attribute) and isinstance(
-            expression.value, ast.Name
-        ):
-            module = self._aliases.get(expression.value.id)
-            if module == "importlib" and expression.attr == "import_module":
-                return "import_module"
-            if module == "typing" and expression.attr == "TYPE_CHECKING":
-                return "type_checking"
-        return None
+    def _known_alias(self, expression: ast.expr) -> frozenset[str]:
+        base = expression.value if isinstance(expression, ast.Attribute) else expression
+        if isinstance(base, ast.Name) and base.id in self._mutations:
+            return _alias_values(
+                expression,
+                {
+                    base.id: self._aliases.get(base.id, _UNKNOWN)
+                    | self._mutations[base.id]
+                },
+            )
+        return _alias_values(expression, self._aliases)
 
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
-        callee = self._known_alias(node.func)
-
-        if callee in {"__import__", "import_module"}:
+        callees = self._known_alias(node.func) & {"__import__", "import_module"}
+        if callees:
+            # Prefer import_module for the literal candidate if both loaders
+            # are possible. Both already carry uncertain dynamic evidence.
+            callee = "import_module" if "import_module" in callees else "__import__"
             target = self._literal_dynamic_target(node, callee)
             if target is not None:
                 self.facts.append(
@@ -632,6 +1064,18 @@ class AstImportFactSource:
         for module in sorted(modules, key=lambda item: (item.id, item.path)):
             source_path = source_root / module.path
             try:
+                # Follow regular-file symlinks, but never open a FIFO or device
+                # supplied directly to the collector or changed since discovery.
+                if not stat.S_ISREG(source_path.stat().st_mode):
+                    diagnostics.append(
+                        Diagnostic(
+                            severity=Severity.ERROR,
+                            code="source_not_regular",
+                            message="Source input must be a regular file.",
+                            path=module.path,
+                        )
+                    )
+                    continue
                 with tokenize.open(source_path) as source_file:
                     source = source_file.read()
             except OSError:
@@ -663,6 +1107,8 @@ class AstImportFactSource:
 
             try:
                 tree = ast.parse(source, filename=module.path)
+                visitor = _ImportVisitor(module, source)
+                visitor.visit(tree)
             except SyntaxError as error:
                 diagnostics.append(
                     Diagnostic(
@@ -675,9 +1121,19 @@ class AstImportFactSource:
                     )
                 )
                 continue
+            except RecursionError:
+                diagnostics.append(
+                    Diagnostic(
+                        severity=Severity.ERROR,
+                        code="source_analysis_limit",
+                        message="Python source exceeded the parser or traversal recursion limit.",
+                        path=module.path,
+                    )
+                )
+                # None of this source's partial observations can establish a
+                # successful extraction. Continue collecting other modules.
+                continue
 
-            visitor = _ImportVisitor(module, source)
-            visitor.visit(tree)
             facts.extend(visitor.facts)
             diagnostics.extend(visitor.diagnostics)
 

@@ -24,25 +24,42 @@ def _reachable_pair_count(graph: nx.DiGraph, components: list[set[str]]) -> int:
     """Count distinct reachable pairs, excluding each module's own identity.
 
     One integer bitset per SCC contains its members and all reachable modules.
-    Union successors in reverse topological order, so shared descendants are
-    counted once. Multiply by the SCC's size because every member has the same
-    reachability, excluding itself. This avoids a quadratic set of Python edge
-    objects, although worst-case bit storage remains quadratic in module count.
+    Bit positions are local to each weakly connected component, and its masks
+    can be discarded before processing the next component. Union successors in
+    reverse topological order, so shared descendants are counted once. Multiply
+    by the SCC's size because every member has the same reachability, excluding
+    itself. Worst-case bit storage remains quadratic within a connected graph.
     """
 
     condensed = nx.condensation(graph, components)
-    positions = {module: index for index, module in enumerate(sorted(graph))}
-    reachable: dict[int, int] = {}
+    topological_order = {
+        component: index
+        for index, component in enumerate(nx.topological_sort(condensed))
+    }
     pair_count = 0
-    for component in reversed(list(nx.topological_sort(condensed))):
-        members = condensed.nodes[component]["members"]
-        mask = 0
-        for module in members:
-            mask |= 1 << positions[module]
-        for dependency in condensed.successors(component):
-            mask |= reachable[dependency]
-        reachable[component] = mask
-        pair_count += len(members) * (mask.bit_count() - 1)
+    for connected in nx.weakly_connected_components(condensed):
+        positions = {
+            module: index
+            for index, module in enumerate(
+                sorted(
+                    module
+                    for component in connected
+                    for module in condensed.nodes[component]["members"]
+                )
+            )
+        }
+        reachable: dict[int, int] = {}
+        for component in sorted(
+            connected, key=topological_order.__getitem__, reverse=True
+        ):
+            members = condensed.nodes[component]["members"]
+            mask = 0
+            for module in members:
+                mask |= 1 << positions[module]
+            for dependency in condensed.successors(component):
+                mask |= reachable[dependency]
+            reachable[component] = mask
+            pair_count += len(members) * (mask.bit_count() - 1)
     return pair_count
 
 

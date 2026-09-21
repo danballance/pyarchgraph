@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
+import random
+import subprocess
+import sys
 
 import pytest
 
-from pyarchgraph.discovery import discover_modules
-from pyarchgraph.model import Severity, SourceModule
+from pyarchgraph.discovery import (
+    _Candidate,
+    _remove_ambiguous_groups,
+    discover_modules,
+)
+from pyarchgraph.model import Diagnostic, Severity, SourceModule
 
 
 def _write_files(root: Path, paths: list[str]) -> None:
@@ -224,3 +232,183 @@ def test_result_order_is_independent_of_filesystem_walk_order(
     monkeypatch.setattr("pyarchgraph.discovery.os.walk", reversed_walk)
 
     assert discover_modules(tmp_path) == expected
+
+
+def _pairwise_conflict_reference(
+    candidates: list[_Candidate],
+) -> tuple[tuple[_Candidate, ...], tuple[Diagnostic, ...]]:
+    """Independent all-pairs reference for inventory and diagnostic semantics."""
+
+    ordered = sorted(candidates, key=lambda item: (item.module.id, item.module.path))
+    groups: dict[str, list[_Candidate]] = {}
+    for candidate in ordered:
+        groups.setdefault(candidate.module.id, []).append(candidate)
+    excluded: set[_Candidate] = set()
+    duplicates = []
+    prefixes = []
+    for module_id, group in groups.items():
+        if len(group) > 1:
+            excluded.update(group)
+            paths = tuple(item.module.path for item in group)
+            duplicates.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "duplicate_module_id",
+                    f"Module ID {module_id!r} is produced by multiple source "
+                    f"files: {', '.join(paths)}.",
+                    path=paths[0],
+                )
+            )
+        non_packages = [item for item in group if not item.module.is_package]
+        descendants = [
+            item for item in ordered if item.module.id.startswith(module_id + ".")
+        ]
+        if non_packages and descendants:
+            excluded.update(non_packages)
+            excluded.update(descendants)
+            paths = sorted(item.module.path for item in descendants)
+            prefixes.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "non_package_prefix_conflict",
+                    f"Non-package module {module_id!r} cannot prefix descendant "
+                    f"modules from: {', '.join(paths)}.",
+                    path=non_packages[0].module.path,
+                )
+            )
+    return (
+        tuple(item for item in ordered if item not in excluded),
+        tuple(duplicates + prefixes),
+    )
+
+
+def test_prefix_index_matches_pairwise_reference_for_generated_inventories() -> None:
+    rng = random.Random(7429)
+    names = ("a", "a.b", "a.b.c", "a.c", "aa", "aa.b", "b", "b.c", "z")
+    for _ in range(200):
+        candidates = []
+        for index in range(rng.randrange(1, 35)):
+            name = rng.choice(names)
+            candidates.append(
+                _Candidate(
+                    SourceModule(
+                        name,
+                        f"source{index:02d}/{name.replace('.', '/')}.py",
+                        bool(rng.randrange(2)),
+                        name.rpartition(".")[0] or None,
+                    )
+                )
+            )
+        expected = _pairwise_conflict_reference(candidates)
+        assert _remove_ambiguous_groups(candidates) == expected
+        assert _remove_ambiguous_groups(reversed(candidates)) == expected
+
+
+def test_duplicate_and_nested_prefix_conflicts_remove_transitive_group(
+    tmp_path: Path,
+) -> None:
+    _write_files(
+        tmp_path,
+        [
+            "a.py",
+            "a/__init__.py",
+            "a/b.py",
+            "a/b/__init__.py",
+            "a/b/child.py",
+            "a/sibling.py",
+            "aa.py",
+            "safe/__init__.py",
+            "safe/child.py",
+        ],
+    )
+
+    result = discover_modules(tmp_path)
+
+    assert tuple(module.id for module in result.modules) == ("aa", "safe", "safe.child")
+    assert [(item.code, item.path) for item in result.diagnostics] == [
+        ("duplicate_module_id", "a.py"),
+        ("duplicate_module_id", "a/b.py"),
+        ("non_package_prefix_conflict", "a.py"),
+        ("non_package_prefix_conflict", "a/b.py"),
+    ]
+    assert (
+        "a/b.py, a/b/__init__.py, a/b/child.py, a/sibling.py"
+        in result.diagnostics[2].message
+    )
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO fixture")
+def test_non_regular_source_is_diagnosed_and_omitted(tmp_path: Path) -> None:
+    _write_files(tmp_path, ["ordinary.py"])
+    os.mkfifo(tmp_path / "pipe.py")
+
+    result = discover_modules(tmp_path)
+
+    assert tuple(module.id for module in result.modules) == ("ordinary",)
+    assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
+        ("source_not_regular", "pipe.py", Severity.ERROR),
+    ]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO fixture")
+def test_fifo_cli_exits_promptly_with_incomplete_report(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    _write_files(source, ["ordinary.py"])
+    os.mkfifo(source / "pipe.py")
+    output = tmp_path / "output"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pyarchgraph",
+            str(source),
+            "--json-only",
+            "--output-dir",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    document = json.loads((output / "dependency-graph.json").read_text())
+    assert document["analysis"]["complete"] is False
+    assert document["quality"]["score"] is None
+    assert [item["code"] for item in document["diagnostics"]] == ["source_not_regular"]
+
+
+def test_regular_file_symlinks_are_retained(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_files(source, ["ordinary.py"])
+    target = tmp_path / "target.py"
+    target.write_text("", encoding="utf-8")
+    try:
+        (source / "linked.py").symlink_to(target)
+    except (NotImplementedError, OSError):
+        pytest.skip("file symlinks are unavailable")
+
+    result = discover_modules(source)
+
+    assert tuple(module.id for module in result.modules) == ("linked", "ordinary")
+    assert result.diagnostics == ()
+
+
+def test_disappearing_source_remains_an_explicit_read_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "pyarchgraph.discovery.os.walk",
+        lambda *args, **kwargs: [(str(tmp_path), [], ["missing.py"])],
+    )
+
+    result = discover_modules(tmp_path)
+
+    assert result.modules == ()
+    assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
+        ("source_read_error", "missing.py", Severity.ERROR),
+    ]

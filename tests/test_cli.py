@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from pyarchgraph import analyse
+from pyarchgraph import cli
 from pyarchgraph.cli import main
 from pyarchgraph.model import (
     Diagnostic,
@@ -22,6 +23,125 @@ def _write(root: Path, relative: str, source: str) -> None:
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source, encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("before_rules", "after_rules"),
+    [
+        (("a:b", "a:b"), ("a:b", "a:b")),
+        (("a:b", "a:b"), ("a:b",)),
+        (("a:b",), ("a:b", "a:b")),
+        (("a:b", "*:b"), ("*:b", "a:b", "a:b")),
+    ],
+)
+def test_cli_equivalent_forbidden_rules_round_trip_baselines(
+    tmp_path: Path, before_rules: tuple[str, ...], after_rules: tuple[str, ...]
+) -> None:
+    source_root = tmp_path / "source"
+    _write(source_root, "a.py", "import b\n")
+    _write(source_root, "b.py", "")
+    before = tmp_path / "before"
+    after = tmp_path / "after"
+    common = [str(source_root), "--json-only", "--check"]
+
+    def options(rules: tuple[str, ...]) -> list[str]:
+        return [option for rule in rules for option in ("--forbid", rule)]
+
+    assert main([*common, *options(before_rules), "--output-dir", str(before)]) == 3
+    baseline = before / "dependency-graph.json"
+    assert main([*common, *options(after_rules), "--output-dir", str(after)]) == 3
+    assert baseline.read_bytes() == (after / "dependency-graph.json").read_bytes()
+    assert main([
+        *common, *options(after_rules), "--output-dir", str(after),
+        "--baseline", str(baseline),
+    ]) == 3
+    document = json.loads((after / "dependency-graph.json").read_text())
+    assert document["baseline_comparison"]["compatible"]
+    assert document["baseline_comparison"]["added_dependencies"] == []
+
+
+@pytest.mark.parametrize("operation", ["write", "flush", "fsync", "close"])
+@pytest.mark.parametrize("artifact", [1, 2])
+def test_cli_staging_failure_cleans_temporary_files_and_preserves_outputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operation: str,
+    artifact: int,
+) -> None:
+    source_root = tmp_path / "source"
+    output_dir = tmp_path / "out"
+    _write(source_root, "a.py", "")
+    _write(output_dir, "dependency-graph.json", "previous JSON\n")
+    _write(output_dir, "dependency-dag.md", "previous Markdown\n")
+    original_temporary_file = cli.tempfile.NamedTemporaryFile
+    original_fsync = cli.os.fsync
+    opened = 0
+
+    class FailingFile:
+        def __init__(self, handle, fail: bool) -> None:
+            self.handle = handle
+            self.name = handle.name
+            self.fail = fail
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.handle.close()
+            if self.fail and operation == "close":
+                raise OSError("injected close failure")
+
+        def write(self, content):
+            # A write failure can occur after partially writing the report.
+            self.handle.write(content)
+            if self.fail and operation == "write":
+                raise OSError("injected write failure")
+
+        def flush(self):
+            self.handle.flush()
+            if self.fail and operation == "flush":
+                raise OSError("injected flush failure")
+
+        def fileno(self):
+            return self.handle.fileno()
+
+    def failing_temporary_file(*args, **kwargs):
+        nonlocal opened
+        opened += 1
+        return FailingFile(original_temporary_file(*args, **kwargs), opened == artifact)
+
+    def failing_fsync(descriptor):
+        if opened == artifact and operation == "fsync":
+            raise OSError("injected fsync failure")
+        return original_fsync(descriptor)
+
+    monkeypatch.setattr(cli.tempfile, "NamedTemporaryFile", failing_temporary_file)
+    monkeypatch.setattr(cli.os, "fsync", failing_fsync)
+
+    assert main([str(source_root), "--output-dir", str(output_dir)]) == 2
+    assert f"injected {operation} failure" in capsys.readouterr().err
+    assert (output_dir / "dependency-graph.json").read_text() == "previous JSON\n"
+    assert (output_dir / "dependency-dag.md").read_text() == "previous Markdown\n"
+    assert sorted(path.name for path in output_dir.iterdir()) == [
+        "dependency-dag.md", "dependency-graph.json"
+    ]
+
+
+def test_staging_cleanup_does_not_mask_original_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_fsync(descriptor):
+        raise OSError("original sync failure")
+
+    def fail_unlink(*args, **kwargs):
+        raise OSError("secondary cleanup failure")
+
+    monkeypatch.setattr(cli.os, "fsync", fail_fsync)
+    monkeypatch.setattr(Path, "unlink", fail_unlink)
+
+    with pytest.raises(OSError, match="original sync failure"):
+        cli._stage_write(tmp_path / "report.json", "report")
 
 
 def test_cli_writes_complete_outputs_without_executing_source(

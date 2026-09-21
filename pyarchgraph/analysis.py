@@ -86,6 +86,7 @@ def analyse(
         raise ValueError(
             "forbidden dependencies require nonempty source and target patterns"
         )
+    forbidden_dependencies = tuple(sorted(set(forbidden_dependencies)))
     effective_excludes = tuple(
         sorted(set(excludes) | (set() if policy.include_tests else set(TEST_EXCLUDES)))
     )

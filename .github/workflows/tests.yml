@@ -1,0 +1,35 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Install the latest patch of each supported stable minor version.
+        # The project requirement also rejects the known Python 3.14.1 regression.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    name: Python ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install the selected Python minor version
+        run: uv python install "${{ matrix.python-version }}"
+      - name: Install locked development dependencies
+        run: uv sync --frozen --group dev
+      - name: Run the test suite
+        run: uv run --no-sync python -m pytest -q
+      - name: Evaluate the architecture corpus
+        run: uv run --no-sync python examples/evaluate.py

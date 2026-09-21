@@ -44,6 +44,12 @@ The command writes:
   condensation DAG, with one `subgraph` per dependency-first layer so an edge
   always points down the page, preceded by the architecture score and breakdown.
 
+Requested artifacts are staged before publication. Replacement is atomic for
+each file, not for the JSON/Markdown pair: if publishing the second file fails,
+new JSON can remain beside older Markdown. Use `--json-only` for machine
+consumers that need one publication point. A staging failure cleans up the new
+temporary files and leaves previously published outputs unchanged.
+
 ## Architecture score
 
 Every run reports an **experimental 0–100 architecture score**, where higher
@@ -113,13 +119,15 @@ print(quality.metrics.cyclic_module_count)
 print(quality.metrics.reachable_pair_count)
 ```
 
-Package version `0.3.0` emits JSON schema `0.3`. It adds
+Package version `0.3.1` emits JSON schema `0.3`. This schema includes
 `architecture_dependencies`, `findings`, `limitations`, `check`, and analysis
 provenance. The metric is now `largest_cyclic_component_size`: `a ↔ b ↔ c`
 has a three-module SCC but no three-module simple cycle. The deprecated Python
 property `largest_cycle_size` remains an alias; JSON uses only the precise name.
 The arithmetic formula remains `architecture-v1`; structural graph selection
 is independently versioned as `structural-v1`.
+Version 0.3.1 changes import extraction and failure handling without changing
+either identifier. See the [release implementation notes](docs/release-0.3.1.md).
 
 The dependency-reach signal is informed by
 [propagation-cost research](https://www.hbs.edu/ris/download.aspx?name=13-093.pdf).
@@ -197,6 +205,19 @@ existing scope model, even though a class body can execute eagerly. An edge
 survives whenever any included import still supports it.
 Moving an import into a function does not automatically improve architecture.
 
+These filters change the structural graph, while coverage checks still use raw
+observations. A missing target or recognized dynamic import requires review even
+when all its evidence is typing-only or local and that evidence is excluded.
+`dependency_resolution_complete` does not become true merely because those
+observations were excluded from the selected graph.
+
+Source candidates must be regular files. File symlinks are accepted when their
+targets are regular files; directory symlinks are skipped. A discovered `.py`
+FIFO, device or other unsupported file type produces `source_not_regular` and
+incomplete analysis rather than being opened or silently ignored. Disappearing
+or unreadable files produce explicit errors. The regular-file checks do not
+guarantee protection against a file being replaced between checking and opening.
+
 Package relationships use an explicit structural policy:
 
 - Raw `dependencies` preserve exact package-base and probable child observations.
@@ -226,18 +247,44 @@ uv run pyarchgraph src --project-root . --expect-package app --forbid 'app.prese
 ```
 
 `--forbid SOURCE:TARGET` matches dotted module IDs using case-sensitive glob
-patterns. Repeat it for additional directional rules. Definite forbidden edges
+patterns. Repeat it for additional directional rules; duplicate rules and rule
+ordering have no semantic effect. Definite forbidden edges
 fail; uncertain matches require review. A high score never clears a violation.
 
-`complete` describes inventory/read/parse success only. `scope_valid` and
-`dependency_resolution_complete` are separate. Missing internal targets and
+`complete` describes inventory, reading and supported source-analysis success.
+Parsing or traversal recursion exhaustion produces `source_analysis_limit`;
+partial facts from that file are discarded while other files are still analysed.
+The CLI writes a valid incomplete report, returns exit 1 and leaves the headline
+score null. Unsupported annotation scopes also make analysis incomplete.
+`scope_valid` and `dependency_resolution_complete` are separate. Missing internal targets and
 relative escapes need review; a valid unmodelled namespace base alone does not.
 Recognized dynamic calls (including straightforward importlib aliases) always
-warn. Supported literal targets are retained as uncertain evidence. Computed
-names, arbitrary reassignment and metaprogramming remain outside the model;
-zero warnings does not prove there are no dynamic imports.
+warn. Supported literal targets are retained as uncertain evidence.
 
-Without `--check`, exit statuses remain 0 for complete parsing, 1 for incomplete
+Alias analysis tracks direct imports and simple name assignments. Alternative
+branches use independent environments; joins and loop iterations retain possible
+loader aliases. An import is typing-only only when the guard is definitely the
+recognized `TYPE_CHECKING` sentinel across the relevant paths. Captures, local
+bindings and comprehension iteration targets shadow outer aliases; assignment
+expressions in comprehensions can affect the containing scope. Generator writes
+remain possible deferred effects, including when a generator is never consumed.
+
+Function bodies use conservative summaries of free bindings, including later
+declarations, closure bindings and writes through `global` or `nonlocal`.
+Decorators and defaults retain their containing-scope evaluation; methods and
+nested class bodies skip enclosing class attributes when resolving free names.
+Method annotations can see their class namespace. On Python 3.12 and newer,
+generic type parameters shadow aliases in their relevant scopes. Type-parameter
+bounds and defaults, and lazy `type` alias expressions, are currently unsupported
+and produce the error diagnostic `unsupported_annotation_scope`.
+
+This is a static approximation, not execution or symbolic evaluation. It can
+retain a loader that a particular runtime path never calls. Arbitrary attribute
+mutation, computed loader names, metaprogramming and general runtime aliasing
+remain outside the model; zero warnings does not prove there are no dynamic
+imports.
+
+Without `--check`, exit statuses remain 0 for complete analysis, 1 for incomplete
 analysis, and 2 for invalid configuration/output errors. With `--check`, status
 3 means a definite cycle or forbidden edge, and 4 means review is needed because
 of uncertain findings, dependency resolution, empty inventory or invalid scope.
@@ -258,7 +305,10 @@ relative source root, exclusions, expected packages, collector identity, and rul
 Incompatible baselines are rejected before output replacement. Module additions,
 removals or path changes require explicit `--allow-inventory-change` after review;
 the report lists them. Old schema baselines must be regenerated, not silently
-compared under new import semantics.
+compared under new import semantics. Version 0.3.1 keeps schema `0.3`, but its
+changed analyser identity and extraction semantics require regenerating 0.3.0
+baselines. Repeated or reordered equivalent forbidden-rule sets produce the same
+report and remain baseline-compatible within the same analyser environment.
 
 Comparisons use semantic `(source, target)` dependency identities, so blank lines
 and import formatting do not create new violations. Source locations remain
@@ -278,15 +328,26 @@ would miss cross-file cycles.
 uv run pytest
 uv run python examples/evaluate.py
 uv run python tests/benchmark_quality.py --case layered --modules 10000
+uv run python tests/benchmark_quality.py --case pairs --modules 40000
+uv run python tests/benchmark_discovery.py --compare-quadratic
 uv run python tests/benchmark_pipeline.py --modules 2000 --repeats 3
 ```
 
 The quality benchmark measures scoring only. The pipeline benchmark launches
 the actual CLI and measures startup through artifact writing; add `--with-diagram`
 for the diagram route and `--compare-quadratic` to time the reviewed prefix helper.
-See [measured results](docs/performance.md). Scoring uses integer bitsets over the component DAG, avoiding a Python
-object for every reachable pair. Worst-case bit storage is still quadratic in
-module count. Run `--case chain` and `--case cycle` separately to cover long
+See [earlier pipeline measurements](docs/performance.md) and the
+[0.3.1 implementation measurements](docs/release-0.3.1.md). The discovery
+benchmark isolates ambiguity detection from filesystem I/O and inventory
+construction. Its optional quadratic reference measures only the old prefix
+scan, rather than the whole old helper.
+
+Scoring uses integer bitsets over the component DAG, avoiding a Python object
+for every reachable pair. Bit positions and retained masks are local to each
+weakly connected component; disconnected pairs therefore avoid large global
+bit positions. The score still uses global active-module denominators.
+Worst-case bit storage remains quadratic within a connected graph.
+Run `--case chain` and `--case cycle` separately to cover long
 dependency paths and a single large cyclic component. Memory output is peak
 process memory, including input objects, Python and NetworkX. Timing is
 reported for investigation rather than used as a flaky unit-test threshold.

@@ -14,7 +14,7 @@ from pyarchgraph.quality import calculate_quality
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--case", choices=("chain", "layered", "cycle"), default="layered"
+        "--case", choices=("chain", "layered", "cycle", "pairs"), default="layered"
     )
     parser.add_argument("--modules", type=int, default=10000)
     args = parser.parse_args()
@@ -24,12 +24,15 @@ def main() -> None:
     names = tuple(f"module{index:05d}" for index in range(args.modules))
     modules = tuple(SourceModule(name, f"{name}.py", False, None) for name in names)
     offsets = (1, 7, 31, 127, 511) if args.case == "layered" else (1,)
-    pairs = [
-        (i, i - offset)
-        for i in range(args.modules)
-        for offset in offsets
-        if i >= offset
-    ]
+    if args.case == "pairs":
+        pairs = [(i, i + 1) for i in range(0, args.modules - 1, 2)]
+    else:
+        pairs = [
+            (i, i - offset)
+            for i in range(args.modules)
+            for offset in offsets
+            if i >= offset
+        ]
     if args.case == "cycle":
         pairs.append((0, args.modules - 1))
     dependencies = tuple(DependencyEdge(names[a], names[b], ()) for a, b in pairs)

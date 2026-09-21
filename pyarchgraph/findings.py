@@ -51,6 +51,7 @@ def build_findings(
     members. The witness is bounded by the component's node count.
     """
 
+    forbidden_dependencies = tuple(sorted(set(forbidden_dependencies)))
     facts_by_id = {fact.id: fact for fact in facts}
     by_pair = {(edge.source, edge.target): edge for edge in dependencies}
     graph = nx.DiGraph()

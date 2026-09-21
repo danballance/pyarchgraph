@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import keyword
 import os
 from pathlib import Path, PurePosixPath
+import stat
 from typing import Iterable
 
 from pyarchgraph.model import Diagnostic, Severity, SourceModule
@@ -46,7 +47,8 @@ def discover_modules(
 
     User exclusions are OR-combined POSIX-relative glob patterns.  They are
     evaluated against both directory and file paths with
-    :meth:`PurePosixPath.match`.  Directory symlinks are never traversed.
+    :meth:`PurePosixPath.match`. Directory symlinks are never traversed, while
+    file symlinks are accepted if their targets are regular files.
 
     Invalid paths and ambiguous module groups are diagnosed and omitted.  The
     returned collections have canonical ordering independent of filesystem
@@ -156,6 +158,28 @@ def _python_paths(
                 continue
             relative_path = PurePosixPath(relative_directory.as_posix(), name)
             if _is_excluded(relative_path, exclude_patterns):
+                continue
+            try:
+                mode = (directory_path / name).stat().st_mode
+            except OSError:
+                diagnostics.append(
+                    Diagnostic(
+                        severity=Severity.ERROR,
+                        code="source_read_error",
+                        message="Could not inspect a source input.",
+                        path=relative_path.as_posix(),
+                    )
+                )
+                continue
+            if not stat.S_ISREG(mode):
+                diagnostics.append(
+                    Diagnostic(
+                        severity=Severity.ERROR,
+                        code="source_not_regular",
+                        message="Source input must be a regular file.",
+                        path=relative_path.as_posix(),
+                    )
+                )
                 continue
             discovered.append(relative_path)
 
@@ -276,21 +300,23 @@ def _remove_ambiguous_groups(
             )
         )
 
-    for prefix_id, prefix_indexes in sorted(by_id.items()):
-        non_package_indexes = [
+    non_packages_by_id = {
+        module_id: [
             index for index in prefix_indexes if not ordered[index].module.is_package
         ]
-        if not non_package_indexes:
-            continue
-        descendant_indexes = [
-            index
-            for module_id, indexes in by_id.items()
-            if module_id.startswith(prefix_id + ".")
-            for index in indexes
-        ]
-        if not descendant_indexes:
-            continue
+        for module_id, prefix_indexes in by_id.items()
+    }
+    # Each descendant contributes only to its proper dotted prefixes. Flat
+    # inventories therefore do no pairwise prefix work, and deep inventories
+    # cost name depth plus the actual diagnostic/conflict output.
+    descendants_by_prefix: defaultdict[str, list[int]] = defaultdict(list)
+    for module_id, indexes in by_id.items():
+        for prefix_id in _proper_prefixes(module_id):
+            if non_packages_by_id.get(prefix_id):
+                descendants_by_prefix[prefix_id].extend(indexes)
 
+    for prefix_id, descendant_indexes in sorted(descendants_by_prefix.items()):
+        non_package_indexes = non_packages_by_id[prefix_id]
         affected = (*non_package_indexes, *descendant_indexes)
         conflicted.update(affected)
         first = affected[0]
