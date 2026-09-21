@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from enum import Enum
 import json
 from typing import Any
 
 from pyarchgraph.graph_ops import essential_edges
-from pyarchgraph.model import AnalysisResult, Dag, Diagnostic, ImportFact, View
+from pyarchgraph.findings import check_status
+from pyarchgraph.model import (
+    AnalysisResult,
+    ArchitectureQuality,
+    Dag,
+    Diagnostic,
+    ImportFact,
+    View,
+)
 
 
 MERMAID_NODE_WARNING_THRESHOLD = 200
@@ -94,7 +103,7 @@ def _view_json(result: AnalysisResult) -> dict[str, Any]:
 
 
 def _as_json_model(result: AnalysisResult) -> dict[str, Any]:
-    """Convert domain objects to the complete v0.1 JSON boundary model."""
+    """Convert domain objects to the complete v0.3 JSON boundary model."""
 
     modules = sorted(result.modules, key=lambda module: module.id)
     facts = sorted(result.import_facts, key=_fact_sort_key)
@@ -125,17 +134,29 @@ def _as_json_model(result: AnalysisResult) -> dict[str, Any]:
     dag_edges = sorted(result.dag.edges, key=lambda edge: (edge.source, edge.target))
 
     return {
-        "schema_version": "0.1",
+        "schema_version": "0.3",
+        "quality": asdict(result.quality),
+        "architecture_dependencies": [
+            asdict(edge) for edge in result.architecture_dependencies
+        ],
+        "findings": list(result.findings),
+        "limitations": list(result.limitations),
+        "check": {"status": check_status(result)},
         "semantics": {
             "node_kind": "python_module",
             "edge_kind": "syntactic_import",
             "edge_direction": "importer_to_imported",
             "implicit_parent_package_imports": False,
             "namespace_packages": "prefixes_known_nodes_not_emitted",
-            "dynamic_imports": "diagnosed_not_resolved",
+            "dynamic_imports": "recognized_calls_diagnosed_literal_targets_uncertain",
+            "architecture_graph": "structural-v1; normalized submodule bases; evidence filters",
+            "dag_graph": "architecture_dependencies",
         },
         "analysis": {
             "complete": result.complete,
+            "scope_valid": result.scope_valid,
+            "dependency_resolution_complete": result.dependency_resolution_complete,
+            "provenance": result.provenance,
             "python_version": result.python_version,
             "excludes": sorted(result.excludes),
             "namespace_prefixes": sorted(result.namespace_prefixes),
@@ -245,7 +266,7 @@ def _as_json_model(result: AnalysisResult) -> dict[str, Any]:
 
 
 def render_json(result: AnalysisResult) -> str:
-    """Render the complete canonical v0.1 JSON document."""
+    """Render the complete canonical v0.3 JSON document."""
 
     return (
         json.dumps(
@@ -257,6 +278,79 @@ def render_json(result: AnalysisResult) -> str:
         )
         + "\n"
     )
+
+
+def _score_label(score: float | None) -> str:
+    return "unavailable" if score is None else f"{score:.1f}/100"
+
+
+def render_quality_summary(quality: ArchitectureQuality) -> str:
+    """Format the same headline for the CLI and Markdown report."""
+
+    value = _score_label(quality.score)
+    if quality.unavailable_reason is not None:
+        value += f" ({quality.unavailable_reason.replace('_', ' ')})"
+    return f"Architecture score: {value} (experimental, {quality.formula_version})"
+
+
+def _quality_markdown(quality: ArchitectureQuality) -> list[str]:
+    metrics = quality.metrics
+    rows = (
+        ("Cycle avoidance (70%)", _score_label(quality.cycle_avoidance_score)),
+        (
+            "Dependency isolation (30%)",
+            _score_label(quality.dependency_isolation_score),
+        ),
+        (
+            "Modules: total / active / isolated",
+            f"{metrics.module_count} / {metrics.active_module_count} / {metrics.isolated_module_count}",
+        ),
+        ("Internal dependencies", str(metrics.dependency_count)),
+        (
+            "Cyclic components / cyclic modules / largest cyclic component",
+            f"{metrics.cyclic_component_count} / {metrics.cyclic_module_count} / {metrics.largest_cyclic_component_size}",
+        ),
+        ("Reachable ordered pairs (excluding self)", str(metrics.reachable_pair_count)),
+        ("Maximum fan-in / fan-out", f"{metrics.max_fan_in} / {metrics.max_fan_out}"),
+        ("Unresolved import records", str(quality.unresolved_import_count)),
+        ("Dynamic-import warnings", str(quality.dynamic_import_warning_count)),
+    )
+    lines = [
+        "## Architecture quality",
+        "",
+        f"**{render_quality_summary(quality)}**",
+        "",
+        "The score uses structural module dependencies in every diagram view. "
+        "Connected additions can dilute a cycle penalty; use the policy findings for checks.",
+        "",
+        "| Metric | Value |",
+        "| --- | --- |",
+        *(f"| {label} | {value} |" for label, value in rows),
+        "",
+    ]
+    if quality.unavailable_reason == "incomplete_analysis":
+        lines.extend(
+            [
+                "> Analysis is incomplete. Metrics describe only the observed partial graph.",
+                "",
+            ]
+        )
+    if quality.unresolved_import_count or quality.dynamic_import_warning_count:
+        lines.extend(
+            [
+                "> Unresolved or dynamic imports may leave dependencies unobserved. "
+                "Literal dynamic targets remain uncertain candidates.",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "Compare runs with the same source root, exclusions and analyser/formula versions. "
+            "This experimental score measures dependency structure, not overall code quality.",
+            "",
+        ]
+    )
+    return lines
 
 
 def _escape_mermaid_label(label: str) -> str:
@@ -319,7 +413,7 @@ def render_mermaid_markdown(
     *,
     implied_edges: ImpliedEdges = ImpliedEdges.DOTTED,
 ) -> str:
-    """Render Markdown using only the already-derived condensation DAG.
+    """Render Markdown from the stored quality report and condensation DAG.
 
     Nodes are grouped into ``subgraph`` blocks by dependency-first layer and
     drawn top-down, so the drawing carries the layering the analysis already
@@ -361,9 +455,30 @@ def render_mermaid_markdown(
         "",
         "Generated file.",
         "",
+        *_quality_markdown(result.quality),
+        f"Policy check: **{check_status(result)}**. Definite and possible findings are separate from the score.",
+        "",
+        *(f"- {limitation}" for limitation in result.limitations),
+        "",
         legend,
         "",
     ]
+    if result.findings:
+        lines.extend(["## Findings", ""])
+        for finding in result.findings:
+            lines.extend(
+                [
+                    f"### {finding['certainty'].capitalize()} {finding['kind'].replace('_', ' ')}",
+                    "",
+                ]
+            )
+            for edge in finding["witness"]:
+                locations = ", ".join(
+                    f"{item['path']}:{item['line']}:{item['column'] + 1} ({item['resolution_kind']})"
+                    for item in edge["evidence"]
+                )
+                lines.append(f"- `{edge['source']} -> {edge['target']}` — {locations}")
+            lines.append("")
     if implied:
         note = {
             ImpliedEdges.DOTTED: (

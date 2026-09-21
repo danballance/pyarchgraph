@@ -67,12 +67,60 @@ def test_cli_writes_partial_result_returns_one_and_prints_diagnostic(
     assert status == 1
     document = json.loads((output_dir / "dependency-graph.json").read_text())
     assert document["analysis"]["complete"] is False
+    assert document["quality"]["score"] is None
+    assert document["quality"]["unavailable_reason"] == "incomplete_analysis"
     assert {item["code"] for item in document["diagnostics"]} == {"source_syntax_error"}
     assert (output_dir / "dependency-dag.md").is_file()
+    stderr = capsys.readouterr().err
+    assert "Architecture score: unavailable (incomplete analysis)" in stderr
     assert (
         "pyarchgraph: broken.py:1:10: error[source_syntax_error]: "
         "Python source could not be parsed."
-    ) in capsys.readouterr().err
+    ) in stderr
+
+
+def test_cli_score_and_import_limitations_match_both_artifacts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_root = tmp_path / "source"
+    output_dir = tmp_path / "out"
+    _write(
+        source_root,
+        "pkg/a.py",
+        "import pkg.b\nimport pkg.b\nimport pkg.missing\n"
+        "import importlib\nimportlib.import_module('pkg.dynamic')\n",
+    )
+    _write(source_root, "pkg/b.py", "VALUE = 1\n")
+    assert main([str(source_root), "--output-dir", str(output_dir)]) == 0
+    stderr = capsys.readouterr().err
+    quality = json.loads((output_dir / "dependency-graph.json").read_text())["quality"]
+    markdown = (output_dir / "dependency-dag.md").read_text()
+    assert quality["score"] == 85.0
+    assert quality["metrics"]["dependency_count"] == 1
+    assert quality["unresolved_import_count"] == 2
+    assert quality["dynamic_import_warning_count"] == 1
+    assert "Architecture score: 85.0/100 (experimental, architecture-v1)" in stderr
+    assert "Architecture score: 85.0/100 (experimental, architecture-v1)" in markdown
+    assert "2 unresolved import records, 1 dynamic-import warnings" in stderr
+    assert "| Unresolved import records | 2 |" in markdown
+    assert "| Dynamic-import warnings | 1 |" in markdown
+    assert "dependencies unobserved" in markdown
+
+
+def test_cli_empty_inventory_has_no_score_but_is_complete(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    output_dir = tmp_path / "out"
+    assert main([str(source_root), "--output-dir", str(output_dir)]) == 0
+    document = json.loads((output_dir / "dependency-graph.json").read_text())
+    assert document["analysis"]["complete"] is True
+    assert document["quality"]["score"] is None
+    assert document["quality"]["unavailable_reason"] == "no_modules"
+    assert "Architecture score: unavailable (no modules)" in capsys.readouterr().err
 
 
 def test_cli_prints_diagnostic_without_source_position(
@@ -273,7 +321,12 @@ def test_cli_records_the_excludes_that_shaped_the_analysis(tmp_path: Path) -> No
 
     assert status == 0
     document = json.loads((output_dir / "dependency-graph.json").read_text())
-    assert document["analysis"]["excludes"] == ["dropped.py"]
+    assert document["analysis"]["excludes"] == [
+        "*_test.py",
+        "dropped.py",
+        "test_*.py",
+        "tests",
+    ]
     assert {module["id"] for module in document["modules"]} == {"kept"}
 
 
@@ -285,3 +338,124 @@ def test_cli_rejects_a_package_depth_below_one(tmp_path: Path) -> None:
         main([str(source_root), "--view", "package", "--package-depth", "0"])
 
     assert caught.value.code == 2
+
+
+def test_json_only_never_renders_or_reduces_the_diagram(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import pyarchgraph.cli as cli
+    import pyarchgraph.rendering as rendering
+
+    source = tmp_path / "src"
+    output = tmp_path / "out"
+    _write(source, "a.py", "import b\n")
+    _write(source, "b.py", "VALUE = 1\n")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("JSON-only route performed diagram work")
+
+    monkeypatch.setattr(cli, "render_mermaid_markdown", forbidden)
+    monkeypatch.setattr(rendering, "essential_edges", forbidden)
+    # Even an unrelated existing non-file diagram target must not affect JSON.
+    (output / "dependency-dag.md").mkdir(parents=True)
+    assert main([str(source), "--json-only", "--output-dir", str(output)]) == 0
+    document = json.loads((output / "dependency-graph.json").read_text())
+    assert document["quality"]["score"] == 85
+    assert document["check"]["status"] == "pass"
+    assert (output / "dependency-dag.md").is_dir()
+
+
+@pytest.mark.parametrize(
+    ("source_text", "expected"),
+    [
+        ("import b\n", 3),
+        ("from pkg import b\n", 4),
+    ],
+)
+def test_check_exits_for_definite_or_possible_cycle(
+    tmp_path: Path, source_text, expected
+) -> None:
+    source = tmp_path / "src"
+    if "pkg" in source_text:
+        _write(source, "pkg/__init__.py", "b = 42\n")
+        _write(source, "pkg/a.py", source_text)
+        _write(source, "pkg/b.py", "import pkg.a\n")
+    else:
+        _write(source, "a.py", source_text)
+        _write(source, "b.py", "import a\n")
+    assert (
+        main(
+            [
+                str(source),
+                "--check",
+                "--json-only",
+                "--output-dir",
+                str(tmp_path / "out"),
+            ]
+        )
+        == expected
+    )
+
+
+def test_cli_baseline_explains_new_cycle_edges_and_rejects_changed_policy(
+    tmp_path: Path, capsys
+) -> None:
+    source = tmp_path / "src"
+    baseline_dir = tmp_path / "before"
+    output = tmp_path / "after"
+    _write(source, "a.py", "import b\n")
+    _write(source, "b.py", "VALUE = 1\n")
+    options = [str(source), "--json-only", "--check"]
+    assert main([*options, "--output-dir", str(baseline_dir)]) == 0
+    baseline = baseline_dir / "dependency-graph.json"
+    _write(source, "b.py", "import a\n")
+    assert (
+        main([*options, "--output-dir", str(output), "--baseline", str(baseline)]) == 3
+    )
+    document = json.loads((output / "dependency-graph.json").read_text())
+    assert document["baseline_comparison"]["added_dependencies"] == [["b", "a"]]
+    witness = document["findings"][0]["witness"]
+    assert [
+        (item["source"], item["target"]) for item in witness if item["new_dependency"]
+    ] == [("b", "a")]
+    previous = (output / "dependency-graph.json").read_bytes()
+    assert (
+        main(
+            [
+                *options,
+                "--output-dir",
+                str(output),
+                "--baseline",
+                str(baseline),
+                "--exclude-local",
+            ]
+        )
+        == 2
+    )
+    assert "incompatible baseline: graph_policy differs" in capsys.readouterr().err
+    assert (output / "dependency-graph.json").read_bytes() == previous
+
+
+def test_forbidden_redundant_direct_dependency_fails_check(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    _write(source, "presentation.py", "import domain\nimport storage\n")
+    _write(source, "domain.py", "import storage\n")
+    _write(source, "storage.py", "VALUE = 1\n")
+    output = tmp_path / "out"
+    assert (
+        main(
+            [
+                str(source),
+                "--json-only",
+                "--check",
+                "--forbid",
+                "presentation:storage",
+                "--output-dir",
+                str(output),
+            ]
+        )
+        == 3
+    )
+    document = json.loads((output / "dependency-graph.json").read_text())
+    assert document["quality"]["score"] == 85
+    assert document["findings"][0]["kind"] == "forbidden_dependency"

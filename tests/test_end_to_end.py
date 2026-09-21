@@ -109,7 +109,26 @@ def test_canonical_json_matches_reviewed_golden_file() -> None:
     fixture_root = Path(__file__).parent / "fixtures" / "golden_minimal"
     golden_path = Path(__file__).parent / "golden" / "minimal-dependency-graph.json"
 
-    result = replace(analyse(fixture_root), python_version="NORMALIZED")
+    result = analyse(fixture_root)
+    analyser = result.provenance["analyser"]
+    assert re.fullmatch(r"[0-9a-f]{64}", analyser["source_digest"])
+    assert analyser["version"]
+    assert analyser["commit"] is None or re.fullmatch(
+        r"[0-9a-f]{40}", analyser["commit"]
+    )
+    result = replace(
+        result,
+        python_version="NORMALIZED",
+        provenance={
+            **result.provenance,
+            "python_version": "NORMALIZED",
+            "analyser": {
+                "version": "NORMALIZED",
+                "commit": "NORMALIZED",
+                "source_digest": "0" * 64,
+            },
+        },
+    )
 
     assert render_json(result) == golden_path.read_text(encoding="utf-8")
 
@@ -171,7 +190,7 @@ importlib.import_module("pkg.dynamic")
 importlib.import_module(dynamic_name)
 __import__("pkg.dynamic")
 __import__(dynamic_name)
-il.import_module("pkg.alias_dynamic_is_ignored")
+il.import_module("pkg.alias_dynamic_target")
 """,
     )
     _write(source_root, "pkg/base.py", "class Thing:\n    pass\n")
@@ -186,6 +205,9 @@ il.import_module("pkg.alias_dynamic_is_ignored")
         "type_target",
     ):
         _write(source_root, f"pkg/{module_name}.py", "VALUE = 1\n")
+    # A real structural shortcut (app -> leaf and app -> conditional -> leaf)
+    # exercises dotted/omitted rendering after package-base normalization.
+    _write(source_root, "pkg/conditional.py", "import pkg.leaf\nVALUE = 1\n")
     _write(
         source_root,
         "pkg/cycle_a.py",
@@ -231,7 +253,7 @@ raise RuntimeError("target code must never execute")
     assert first_run.stdout == ""
     assert "22 modules" in first_run.stderr
     assert "2 cyclic components" in first_run.stderr
-    assert "6 diagnostics" in first_run.stderr
+    assert "7 diagnostics" in first_run.stderr
     assert not execution_marker.exists()
 
     json_path = output_dir / "dependency-graph.json"
@@ -241,9 +263,14 @@ raise RuntimeError("target code must never execute")
     document = json.loads(json_bytes)
     markdown = markdown_bytes.decode("utf-8")
 
-    # The public JSON boundary has the complete declared v0.1 shape.
+    # The public JSON boundary has the complete declared v0.3 shape.
     assert set(document) == {
         "schema_version",
+        "quality",
+        "architecture_dependencies",
+        "findings",
+        "limitations",
+        "check",
         "semantics",
         "analysis",
         "modules",
@@ -254,9 +281,15 @@ raise RuntimeError("target code must never execute")
         "dag",
         "diagnostics",
     }
-    assert document["schema_version"] == "0.1"
+    assert document["schema_version"] == "0.3"
+    assert document["quality"]["score"] is None
+    assert document["quality"]["unavailable_reason"] == "incomplete_analysis"
+    assert document["quality"]["metrics"]["module_count"] == 22
+    assert document["quality"]["dynamic_import_warning_count"] == 5
     assert document["semantics"] == {
-        "dynamic_imports": "diagnosed_not_resolved",
+        "dynamic_imports": "recognized_calls_diagnosed_literal_targets_uncertain",
+        "architecture_graph": "structural-v1; normalized submodule bases; evidence filters",
+        "dag_graph": "architecture_dependencies",
         "edge_direction": "importer_to_imported",
         "edge_kind": "syntactic_import",
         "implicit_parent_package_imports": False,
@@ -266,11 +299,30 @@ raise RuntimeError("target code must never execute")
     assert set(document["analysis"]) == {
         "excludes",
         "complete",
+        "scope_valid",
+        "dependency_resolution_complete",
+        "provenance",
         "python_version",
         "namespace_prefixes",
         "view",
     }
     assert document["analysis"]["complete"] is False
+    assert document["analysis"]["scope_valid"] is True
+    assert document["analysis"]["dependency_resolution_complete"] is False
+    assert document["check"] == {"status": "fail"}
+    assert document["limitations"]
+    provenance = document["analysis"]["provenance"]
+    assert provenance["source_root"] == "."
+    assert provenance["formula_version"] == document["quality"]["formula_version"]
+    assert provenance["graph_policy_version"] == "structural-v1"
+    assert provenance["python_version"] == document["analysis"]["python_version"]
+    assert provenance["graph_policy"] == {
+        "include_type_only": True,
+        "include_local": True,
+        "include_tests": False,
+    }
+    assert provenance["excludes"] == document["analysis"]["excludes"]
+    assert re.fullmatch(r"[0-9a-f]{64}", provenance["analyser"]["source_digest"])
     assert re.fullmatch(r"\d+\.\d+\.\d+", document["analysis"]["python_version"])
     assert document["analysis"]["namespace_prefixes"] == ["namespace"]
     assert document["analysis"]["view"] == {"kind": "module"}
@@ -302,12 +354,28 @@ raise RuntimeError("target code must never execute")
     facts = document["import_facts"]
     assert facts == sorted(facts, key=_fact_sort_key)
     assert all(set(fact) == FACT_KEYS for fact in facts)
-    assert {fact["syntax"] for fact in facts} == {"import", "import_from"}
+    assert {fact["syntax"] for fact in facts} == {
+        "import",
+        "import_from",
+        "dynamic_import",
+    }
     assert {fact["scope"] for fact in facts} == {"module", "local"}
     fact_ids = [fact["id"] for fact in facts]
     assert len(fact_ids) == len(set(fact_ids))
     assert all(re.fullmatch(r"fact-[0-9a-f]{12,64}", fact_id) for fact_id in fact_ids)
     facts_by_id = {fact["id"]: fact for fact in facts}
+    dynamic_facts = [fact for fact in facts if fact["syntax"] == "dynamic_import"]
+    assert len(dynamic_facts) == 3
+    assert {fact["base_module"] for fact in dynamic_facts} == {
+        "pkg.dynamic",
+        "pkg.alias_dynamic_target",
+    }
+    assert (
+        _fact_by_segment(
+            document, "pkg.app", 'il.import_module("pkg.alias_dynamic_target")'
+        )["syntax"]
+        == "dynamic_import"
+    )
 
     aliased_absolute = _fact_by_segment(
         document, "pkg.app", "import pkg.base as base_alias"
@@ -390,6 +458,12 @@ raise RuntimeError("target code must never execute")
         for evidence in dependency["evidence"]
         if evidence["fact_id"] == ambiguous_from["id"]
     } == {("pkg", "exact_base"), ("pkg.leaf", "probable_submodule")}
+    assert {
+        (dependency["target"], evidence["resolution_kind"])
+        for dependency in document["architecture_dependencies"]
+        for evidence in dependency["evidence"]
+        if evidence["fact_id"] == ambiguous_from["id"]
+    } == {("pkg.leaf", "probable_submodule")}
 
     wildcard = _fact_by_segment(document, "pkg.sub.worker", "from pkg.base import *")
     assert [
@@ -441,6 +515,8 @@ raise RuntimeError("target code must never execute")
         ("pkg.app", "namespace", "namespace_base_unmodelled"),
         ("pkg.app", "namespace.absent", "missing_internal_target"),
         ("pkg.app", "pkg.missing", "missing_internal_target"),
+        ("pkg.app", "pkg.dynamic", "missing_internal_target"),
+        ("pkg.app", "pkg.alias_dynamic_target", "missing_internal_target"),
         ("pkg.sub.worker", "...", "relative_escape"),
         ("top_level", ".", "relative_escape"),
     }
@@ -458,7 +534,7 @@ raise RuntimeError("target code must never execute")
         for item in document["unresolved_imports"]
     )
 
-    # Every static fact is traceable from an edge or an explicit classification.
+    # Every static or literal-dynamic fact is traceable from an edge or classification.
     referenced_fact_ids = {
         evidence["fact_id"]
         for dependency in document["dependencies"]
@@ -489,7 +565,7 @@ raise RuntimeError("target code must never execute")
             for item in document[collection_name]
         )
 
-    # Raw cycles are preserved, while the exported graph is their condensation.
+    # Structural cycles are preserved in the architecture graph condensation.
     dag = document["dag"]
     assert set(dag) == {"nodes", "edges", "dependency_first_layers"}
     assert all(set(node) == {"id", "members", "cyclic"} for node in dag["nodes"])
@@ -515,6 +591,34 @@ raise RuntimeError("target code must never execute")
     assert self_loop["cyclic"] is True
     assert isolated["cyclic"] is False
     assert broken["cyclic"] is False
+    findings = document["findings"]
+    assert len(findings) == 2
+    assert {tuple(finding["members"]) for finding in findings} == {
+        ("pkg.cycle_a", "pkg.cycle_b"),
+        ("pkg.self_loop",),
+    }
+    for finding in findings:
+        assert finding["kind"] == "cycle"
+        assert finding["certainty"] == "definite"
+        assert re.fullmatch(r"cycle-[0-9a-f]{64}", finding["id"])
+        assert 1 <= len(finding["witness"]) <= len(finding["members"])
+        for index, edge in enumerate(finding["witness"]):
+            assert (
+                edge["target"]
+                == finding["witness"][(index + 1) % len(finding["witness"])]["source"]
+            )
+            assert re.fullmatch(r"dependency-[0-9a-f]{64}", edge["id"])
+            for evidence in edge["evidence"]:
+                assert set(evidence) == FACT_KEYS | {"resolution_kind"}
+                assert {key: evidence[key] for key in FACT_KEYS} == facts_by_id[
+                    evidence["id"]
+                ]
+                assert (
+                    evidence["source_segment"]
+                    in (source_root / evidence["path"])
+                    .read_text()
+                    .splitlines()[evidence["line"] - 1]
+                )
 
     component_for = {
         member: node["id"] for node in dag["nodes"] for member in node["members"]
@@ -524,7 +628,7 @@ raise RuntimeError("target code must never execute")
         for edge in dag["edges"]
         for raw in edge["raw_dependencies"]
     ]
-    for dependency in document["dependencies"]:
+    for dependency in document["architecture_dependencies"]:
         raw = (dependency["source"], dependency["target"])
         if component_for[raw[0]] == component_for[raw[1]]:
             assert raw not in condensed_raw_dependencies
@@ -544,7 +648,7 @@ raise RuntimeError("target code must never execute")
     )
 
     diagnostic_codes = [item["code"] for item in document["diagnostics"]]
-    assert diagnostic_codes.count("dynamic_import_ignored") == 4
+    assert diagnostic_codes.count("dynamic_import_ignored") == 5
     assert diagnostic_codes.count("source_decode_error") == 1
     assert diagnostic_codes.count("source_syntax_error") == 1
     assert all(

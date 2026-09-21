@@ -94,13 +94,19 @@ def resolve_imports(
             )
 
     for fact in facts:
-        if fact.syntax == ImportSyntax.IMPORT:
+        if fact.syntax in (ImportSyntax.IMPORT, ImportSyntax.DYNAMIC_IMPORT):
             # ``base_module`` is the canonical extraction representation.  The
             # fallback also makes the resolver tolerant of protocol-backed fact
             # sources that retain an Import alias in ``imported_name``.
             requested = fact.base_module or fact.imported_name or ""
             if requested in module_ids:
-                add_dependency(fact, requested, ResolutionKind.EXACT_MODULE)
+                add_dependency(
+                    fact,
+                    requested,
+                    ResolutionKind.DYNAMIC_LITERAL
+                    if fact.syntax == ImportSyntax.DYNAMIC_IMPORT
+                    else ResolutionKind.EXACT_MODULE,
+                )
             else:
                 classify_absent(fact, requested)
             continue
@@ -162,6 +168,11 @@ def resolve_imports(
                     candidate,
                     ResolutionKind.PROBABLE_SUBMODULE,
                 )
+            elif absolute_base in namespace_ids:
+                # A namespace has no indexed initializer supplying attributes.
+                # Retain the unmodelled base, but do not let an absent child
+                # masquerade as a successfully resolved namespace import.
+                classify_absent(fact, candidate)
 
     dependencies = tuple(
         DependencyEdge(
@@ -208,4 +219,50 @@ def resolve_imports(
     )
 
 
-__all__ = ["resolve_imports"]
+def architecture_dependencies(
+    dependencies: tuple[DependencyEdge, ...],
+) -> tuple[DependencyEdge, ...]:
+    """Select structural relationships while retaining their evidence kinds.
+
+    A ``from package import child`` fact can support both an exact package
+    base and a probable source-backed child. For the architecture graph, use
+    the child candidate instead of that same fact's package-base relation.
+    This makes direct submodule spellings structurally comparable without
+    adding implicit package-initialisation edges for either spelling.
+
+    The observed resolver output must remain available separately. An
+    initializer may shadow the child with an attribute: the child remains
+    *probable*, and this policy cannot establish runtime bindings. Attribute,
+    star and re-export imports without an indexed child retain the package
+    relation, as does independent evidence supporting the same package edge.
+
+    Apply this selection before filtering evidence by certainty or scope, so
+    removing a probable edge never revives its suppressed package-base edge.
+    """
+
+    replaced_bases = {
+        (edge.source, edge.target.rpartition(".")[0], evidence.fact_id)
+        for edge in dependencies
+        for evidence in edge.evidence
+        if evidence.resolution_kind == ResolutionKind.PROBABLE_SUBMODULE
+    }
+    selected = []
+    for edge in dependencies:
+        evidence = tuple(
+            item
+            for item in edge.evidence
+            if not (
+                item.resolution_kind == ResolutionKind.EXACT_BASE
+                and (edge.source, edge.target, item.fact_id) in replaced_bases
+            )
+        )
+        if evidence:
+            selected.append(
+                DependencyEdge(
+                    source=edge.source, target=edge.target, evidence=evidence
+                )
+            )
+    return tuple(selected)
+
+
+__all__ = ["architecture_dependencies", "resolve_imports"]

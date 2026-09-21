@@ -1,0 +1,869 @@
+{
+  "schema_version": 1,
+  "description": "Committed source projects with desired architectural outcomes, plus immutable observations of the implementation reviewed at 925276db.",
+  "review_baseline": "review-baseline.json",
+  "graph_policy": {
+    "description": "Structural imports include local and typing-only evidence; definite and candidate resolution evidence must be distinguished. Scope is explicit for every run."
+  },
+  "projects": [
+    {
+      "id": "layered_service",
+      "title": "Layered order service",
+      "category": "good",
+      "intent": "A presentation layer delegates through an application service to persistence and a shared domain model. A long acyclic path is legitimate; a 90-point score threshold would reject this simple design.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 0,
+        "dependency_count": 3,
+        "reachable_pair_count": 6,
+        "score": 85.0,
+        "forbidden_dependencies": [
+          [
+            "presentation",
+            "repository"
+          ]
+        ]
+      },
+      "observed_reviewed": {
+        "score": 85.0,
+        "cyclic_module_count": 0,
+        "dependency_count": 3,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "ports_and_adapters",
+      "title": "Notification ports and adapters",
+      "category": "good",
+      "intent": "The workflow depends on a narrow delivery protocol. Composition selects an email adapter; the domain and the protocol do not import infrastructure.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 0,
+        "forbidden_dependencies": [
+          [
+            "workflow",
+            "email_adapter"
+          ],
+          [
+            "domain",
+            "email_adapter"
+          ]
+        ],
+        "required_dependencies": [
+          [
+            "workflow",
+            "ports"
+          ],
+          [
+            "composition",
+            "email_adapter"
+          ]
+        ]
+      },
+      "observed_reviewed": {
+        "score": 88.0,
+        "cyclic_module_count": 0,
+        "dependency_count": 6,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "definite_cycle",
+      "title": "Order and inventory cycle",
+      "category": "failure",
+      "intent": "Two exact module imports form a definite cycle. The cycle must remain a finding regardless of unrelated connected code or tests.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 2,
+        "dependency_count": 2,
+        "score": 0.0,
+        "definite_cycle_count": 1
+      },
+      "observed_reviewed": {
+        "score": 0.0,
+        "cyclic_module_count": 2,
+        "dependency_count": 2,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "self_import",
+      "title": "Registry imports itself",
+      "category": "failure",
+      "intent": "A module importing itself is a cyclic component of size one and needs a bounded witness.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 1,
+        "dependency_count": 1,
+        "definite_cycle_count": 1
+      },
+      "observed_reviewed": {
+        "score": 30.0,
+        "cyclic_module_count": 1,
+        "dependency_count": 1,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "cycle_with_independent_pair",
+      "title": "Cycle plus an unrelated feature",
+      "category": "control",
+      "intent": "Adding an unrelated receipt-to-currency dependency raises the score from 0 to 57.5 while leaving the same order cycle untouched. Removing that dependency lowers the score despite removing coupling.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 2,
+        "dependency_count": 3,
+        "score": 57.5,
+        "definite_cycle_count": 1
+      },
+      "observed_reviewed": {
+        "score": 57.5,
+        "cyclic_module_count": 2,
+        "dependency_count": 3,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "cycle_with_49_pairs",
+      "title": "Cycle diluted by 49 independent pairs",
+      "category": "control",
+      "intent": "A mathematical control: 49 unrelated one-way pairs push the headline above 98, but the original two-module cycle still needs a finding. Files are deterministic committed inputs, not created during test collection.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 2,
+        "dependency_count": 51,
+        "definite_cycle_count": 1
+      },
+      "observed_reviewed": {
+        "score": 98.44545454545455,
+        "cyclic_module_count": 2,
+        "dependency_count": 51,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "cycle_with_test_padding",
+      "title": "Cycle diluted by test consumers",
+      "category": "control",
+      "intent": "One hundred test modules import the cyclic order module. Including them yields a high score; excluding tests restores the production score to zero without changing the cycle.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 2,
+        "dependency_count": 102,
+        "definite_cycle_count": 1
+      },
+      "variants": [
+        {
+          "id": "production_only",
+          "source_root": ".",
+          "exclusions": [
+            "tests/**"
+          ],
+          "expected_packages": [],
+          "desired": {
+            "cyclic_module_count": 2,
+            "dependency_count": 2,
+            "score": 0.0,
+            "definite_cycle_count": 1
+          },
+          "observed_reviewed": {
+            "score": 0.0,
+            "cyclic_module_count": 2,
+            "dependency_count": 2,
+            "unresolved_import_count": 0,
+            "dynamic_import_warning_count": 0
+          },
+          "graph_policy": {
+            "include_type_only": true,
+            "include_local": true,
+            "include_tests": false
+          }
+        }
+      ],
+      "observed_reviewed": {
+        "score": 98.03921568627452,
+        "cyclic_module_count": 2,
+        "dependency_count": 102,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": true
+      }
+    },
+    {
+      "id": "cycle_with_isolated_modules",
+      "title": "Unused files cannot dilute the cycle",
+      "category": "control",
+      "intent": "Isolated modules add inventory but do not change the active-module denominator or the two-module cycle score.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 2,
+        "active_module_count": 2,
+        "isolated_module_count": 2,
+        "score": 0.0,
+        "definite_cycle_count": 1
+      },
+      "observed_reviewed": {
+        "score": 0.0,
+        "cyclic_module_count": 2,
+        "dependency_count": 2,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "dense_ordered_dag",
+      "title": "Six direct edges with the same reachability",
+      "category": "warning",
+      "intent": "The fully ordered four-module DAG has twice the direct dependencies of layered_service, but exactly the same transitive reachability and score. Direct forbidden dependencies need their own rule.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 0,
+        "dependency_count": 6,
+        "reachable_pair_count": 6,
+        "score": 85.0,
+        "directional_violations": [
+          [
+            "presentation",
+            "repository"
+          ]
+        ]
+      },
+      "observed_reviewed": {
+        "score": 85.0,
+        "cyclic_module_count": 0,
+        "dependency_count": 6,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "spelling_relative",
+      "title": "Equivalent package imports: relative",
+      "category": "warning",
+      "intent": "The package re-exports a, and a uses b.VALUE. Relative from-import and absolute submodule spelling must yield the same architectural dependencies and score. Package initialization syntax is still retained as evidence.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [
+        "pkg"
+      ],
+      "desired": {
+        "cyclic_module_count": 0,
+        "equivalent_project": "spelling_absolute",
+        "required_dependencies": [
+          [
+            "pkg",
+            "pkg.a"
+          ],
+          [
+            "pkg.a",
+            "pkg.b"
+          ]
+        ]
+      },
+      "observed_reviewed": {
+        "score": 33.333333333333336,
+        "cyclic_module_count": 2,
+        "dependency_count": 3,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "spelling_absolute",
+      "title": "Equivalent package imports: absolute",
+      "category": "warning",
+      "intent": "The package re-exports a, and a uses b.VALUE. Relative from-import and absolute submodule spelling must yield the same architectural dependencies and score. Package initialization syntax is still retained as evidence.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [
+        "pkg"
+      ],
+      "desired": {
+        "cyclic_module_count": 0,
+        "equivalent_project": "spelling_relative",
+        "required_dependencies": [
+          [
+            "pkg",
+            "pkg.a"
+          ],
+          [
+            "pkg.a",
+            "pkg.b"
+          ]
+        ]
+      },
+      "observed_reviewed": {
+        "score": 85.0,
+        "cyclic_module_count": 0,
+        "dependency_count": 2,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "shadowed_package_attribute",
+      "title": "An attribute shadows a child-module candidate",
+      "category": "warning",
+      "intent": "pkg defines b = 42, so from pkg import b can consume a package attribute despite a same-named source module. A candidate edge may suggest a cycle, but cannot justify a definite cycle failure.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [
+        "pkg"
+      ],
+      "desired": {
+        "definite_cycle_count": 0,
+        "candidate_cycle_count": 1,
+        "uncertainty_must_be_reported": true
+      },
+      "observed_reviewed": {
+        "score": 33.333333333333336,
+        "cyclic_module_count": 2,
+        "dependency_count": 3,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "type_only_cycle",
+      "title": "Type-only mutual references",
+      "category": "warning",
+      "intent": "Mutual type references remain structural dependencies while a runtime-only policy may omit them. A policy choice must be recorded rather than presented as a universal architectural improvement.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 2,
+        "without_type_only_dependency_count": 0,
+        "without_type_only_cyclic_module_count": 0
+      },
+      "observed_reviewed": {
+        "score": 0.0,
+        "cyclic_module_count": 2,
+        "dependency_count": 2,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "local_import_cycle",
+      "title": "Function-local mutual imports",
+      "category": "warning",
+      "intent": "Moving imports into functions changes eager initialization, but leaves the structural cycle intact. An eager-import view can be separate from the architecture view.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 2,
+        "without_local_dependency_count": 0,
+        "without_local_cyclic_module_count": 0
+      },
+      "observed_reviewed": {
+        "score": 0.0,
+        "cyclic_module_count": 2,
+        "dependency_count": 2,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "mixed_import_evidence",
+      "title": "Ordinary and type-only evidence for one edge",
+      "category": "failure",
+      "intent": "One dependency has both ordinary and type-only supporting imports. Filtering type-only facts must keep the ordinary edge and the resulting cycle.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 2,
+        "without_type_only_dependency_count": 2,
+        "without_type_only_cyclic_module_count": 2,
+        "definite_cycle_count": 1
+      },
+      "observed_reviewed": {
+        "score": 0.0,
+        "cyclic_module_count": 2,
+        "dependency_count": 2,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "src_root_hazard",
+      "title": "A source-layout cycle and its incorrect root",
+      "category": "failure",
+      "intent": "The declared import root is src. Analysing the repository instead changes pkg.* identities to src.pkg.* and can hide the real cycle behind external-unknown imports. Validate expected package names before using the score.",
+      "source_root": "src",
+      "exclusions": [],
+      "expected_packages": [
+        "pkg"
+      ],
+      "desired": {
+        "cyclic_module_count": 2,
+        "score": 0.0,
+        "definite_cycle_count": 1
+      },
+      "variants": [
+        {
+          "id": "incorrect_repository_root",
+          "source_root": ".",
+          "exclusions": [],
+          "expected_packages": [
+            "pkg"
+          ],
+          "desired": {
+            "scope_valid": false,
+            "must_not_claim_safe": true
+          },
+          "observed_reviewed": {
+            "score": 100.0,
+            "cyclic_module_count": 0,
+            "dependency_count": 0,
+            "unresolved_import_count": 0,
+            "dynamic_import_warning_count": 0
+          },
+          "graph_policy": {
+            "include_type_only": true,
+            "include_local": true,
+            "include_tests": false
+          }
+        }
+      ],
+      "observed_reviewed": {
+        "score": 0.0,
+        "cyclic_module_count": 2,
+        "dependency_count": 2,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "missing_internal_target",
+      "title": "A missing regular-package module",
+      "category": "failure",
+      "intent": "A source-backed package imports a nonexistent sibling. Parsing can be complete while internal dependency knowledge is incomplete, so missing targets must remain explicit.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [
+        "catalog"
+      ],
+      "desired": {
+        "unresolved_reasons": [
+          "missing_internal_target"
+        ],
+        "complete": true,
+        "must_not_claim_safe": true
+      },
+      "observed_reviewed": {
+        "score": 100.0,
+        "cyclic_module_count": 0,
+        "dependency_count": 0,
+        "unresolved_import_count": 1,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "valid_namespace_package",
+      "title": "A valid namespace-package import",
+      "category": "warning",
+      "intent": "There are deliberately no __init__.py files. The reader is a real namespace-package submodule; an unmodelled namespace base is different from a missing internal target.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [
+        "plugins"
+      ],
+      "desired": {
+        "required_dependencies": [
+          [
+            "plugins.cli",
+            "plugins.readers.csv_reader"
+          ]
+        ],
+        "forbidden_unresolved_reasons": [
+          "missing_internal_target"
+        ],
+        "complete": true
+      },
+      "observed_reviewed": {
+        "score": 85.0,
+        "cyclic_module_count": 0,
+        "dependency_count": 1,
+        "unresolved_import_count": 1,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "dynamic_literal",
+      "title": "Direct literal dynamic imports",
+      "category": "warning",
+      "intent": "The literal plugin target is statically visible in importlib.import_module and __import__. Record targets or explicit unsupported evidence rather than treating a zero-edge graph as dependency-free.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "dynamic_calls": 2,
+        "literal_dynamic_targets": [
+          "plugin"
+        ],
+        "dynamic_imports_must_be_reported": true
+      },
+      "observed_reviewed": {
+        "score": 85.0,
+        "cyclic_module_count": 0,
+        "dependency_count": 1,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 2
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "dynamic_aliases",
+      "title": "Aliased dynamic import functions",
+      "category": "warning",
+      "intent": "Straightforward importlib module aliases and imported function aliases should be recognised. Literal plugin targets are available without executing any source.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "dynamic_calls": 3,
+        "literal_dynamic_targets": [
+          "plugin"
+        ],
+        "dynamic_imports_must_be_reported": true
+      },
+      "observed_reviewed": {
+        "score": 100.0,
+        "cyclic_module_count": 0,
+        "dependency_count": 0,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "dynamic_nonliteral",
+      "title": "Configuration-selected dynamic imports",
+      "category": "warning",
+      "intent": "A runtime-selected plugin name cannot be resolved from its call expression. Both module and function aliases need a visible warning and must not claim exhaustive dependency knowledge.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "dynamic_calls": 2,
+        "nonliteral_dynamic_calls": 2,
+        "dynamic_imports_must_be_reported": true
+      },
+      "observed_reviewed": {
+        "score": 100.0,
+        "cyclic_module_count": 0,
+        "dependency_count": 0,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "scc_not_simple_cycle",
+      "title": "A three-module component with two-node cycles",
+      "category": "failure",
+      "intent": "Editor and history each depend on events, while events depends on both. The SCC has three modules, but the longest simple cycle has two: component size must not be labelled cycle length.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 3,
+        "largest_cyclic_component_size": 3,
+        "longest_simple_cycle_size": 2,
+        "definite_cycle_count": 1,
+        "bounded_witness_count": 1
+      },
+      "observed_reviewed": {
+        "score": 0.0,
+        "cyclic_module_count": 3,
+        "dependency_count": 4,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "dense_cyclic_component",
+      "title": "Many simple cycles, one bounded finding",
+      "category": "failure",
+      "intent": "Five modules all import one another. Report one bounded witness for the cyclic component instead of enumerating all simple cycles.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 5,
+        "dependency_count": 20,
+        "largest_cyclic_component_size": 5,
+        "definite_cycle_count": 1,
+        "bounded_witness_count": 1
+      },
+      "observed_reviewed": {
+        "score": 0.0,
+        "cyclic_module_count": 5,
+        "dependency_count": 20,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "legitimate_package_reexport",
+      "title": "A public package re-export",
+      "category": "good",
+      "intent": "The application consumes a public class through a package initializer. Keeping app -> toolkit and toolkit -> toolkit.models preserves a real dependency; removing every package edge would erase it.",
+      "source_root": ".",
+      "exclusions": [],
+      "expected_packages": [
+        "toolkit"
+      ],
+      "desired": {
+        "cyclic_module_count": 0,
+        "required_dependencies": [
+          [
+            "application",
+            "toolkit"
+          ],
+          [
+            "toolkit",
+            "toolkit.models"
+          ]
+        ]
+      },
+      "observed_reviewed": {
+        "score": 85.0,
+        "cyclic_module_count": 0,
+        "dependency_count": 2,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    },
+    {
+      "id": "location_only_edit",
+      "title": "Stable violation identity after whitespace edits",
+      "category": "control",
+      "intent": "The before and after roots contain the same order/inventory dependencies. Comments and blank lines shift import locations and fact IDs, but must not create a new architectural violation in a baseline comparison.",
+      "source_root": "before",
+      "exclusions": [],
+      "expected_packages": [],
+      "desired": {
+        "cyclic_module_count": 2,
+        "semantic_dependencies_unchanged": true,
+        "fact_ids_may_change": true
+      },
+      "variants": [
+        {
+          "id": "after_documentation_edit",
+          "source_root": "after",
+          "exclusions": [],
+          "expected_packages": [],
+          "desired": {
+            "cyclic_module_count": 2,
+            "semantic_dependencies_unchanged": true,
+            "fact_ids_may_change": true
+          },
+          "observed_reviewed": {
+            "score": 0.0,
+            "cyclic_module_count": 2,
+            "dependency_count": 2,
+            "unresolved_import_count": 0,
+            "dynamic_import_warning_count": 0
+          },
+          "graph_policy": {
+            "include_type_only": true,
+            "include_local": true,
+            "include_tests": false
+          }
+        }
+      ],
+      "observed_reviewed": {
+        "score": 0.0,
+        "cyclic_module_count": 2,
+        "dependency_count": 2,
+        "unresolved_import_count": 0,
+        "dynamic_import_warning_count": 0
+      },
+      "graph_policy": {
+        "include_type_only": true,
+        "include_local": true,
+        "include_tests": false
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "id": "cycle_dilution",
+      "projects": [
+        "definite_cycle",
+        "cycle_with_independent_pair",
+        "cycle_with_49_pairs",
+        "cycle_with_test_padding"
+      ],
+      "expectation": "The same definite two-module cycle remains reportable regardless of the headline score."
+    },
+    {
+      "id": "reachability_blind_spot",
+      "projects": [
+        "layered_service",
+        "dense_ordered_dag"
+      ],
+      "expectation": "Scores and reachability match; direct edge counts and directional rule results differ."
+    },
+    {
+      "id": "spelling_equivalence",
+      "projects": [
+        "spelling_relative",
+        "spelling_absolute"
+      ],
+      "expectation": "Architecture graph and score match while source syntax evidence differs."
+    },
+    {
+      "id": "missing_vs_namespace",
+      "projects": [
+        "missing_internal_target",
+        "valid_namespace_package"
+      ],
+      "expectation": "A missing module is not conflated with a source-backed namespace child."
+    }
+  ]
+}
