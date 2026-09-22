@@ -373,6 +373,7 @@ def test_omit_mode_drops_the_implied_edge_and_says_so() -> None:
     assert (
         "understates coupling" in rendered or "carry most of the coupling" in rendered
     )
+    assert "also select `--output json` to write every edge" in rendered
 
 
 def test_a_single_import_implied_edge_is_dotted_without_a_label() -> None:

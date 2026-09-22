@@ -493,7 +493,8 @@ def render_mermaid_markdown(
                 f"> {len(implied)} of {len(dag.edges)} edges are implied by a "
                 "longer path and are not drawn. Reachability is unchanged, but "
                 "the omitted edges may carry most of the coupling; "
-                "`dependency-graph.json` lists every edge."
+                "also select `--output json` to write every edge to "
+                "`dependency-graph.json`."
             ),
         }[implied_edges]
         lines.extend([note, ""])

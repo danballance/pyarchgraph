@@ -37,7 +37,7 @@ repeated:
 uv run pyarchgraph . --exclude 'pkg/generated/**' --exclude 'tests/**'
 ```
 
-The command writes:
+By default, the command writes:
 
 - `dependency-graph.json`, the canonical evidence-rich model and architecture score; and
 - `dependency-dag.md`, a Mermaid `flowchart TD` derived only from that model's
@@ -50,12 +50,44 @@ new JSON can remain beside older Markdown. Use `--json-only` for machine
 consumers that need one publication point. A staging failure cleans up the new
 temporary files and leaves previously published outputs unchanged.
 
+## Selecting outputs
+
+Use `--output` to select JSON, the graph report, or the score independently.
+Repeat it to combine outputs; repeated selections are written only once:
+
+```console
+uv run pyarchgraph SOURCE_ROOT --output json --output-dir build/pyarchgraph
+uv run pyarchgraph SOURCE_ROOT --output graph --output-dir build/pyarchgraph
+uv run pyarchgraph SOURCE_ROOT --output score
+uv run pyarchgraph SOURCE_ROOT --output graph --output score --output-dir build/pyarchgraph
+```
+
+Without `--output`, the existing default remains JSON and Markdown files plus
+the score summary on stderr. `--json-only` remains a compatibility alias for
+JSON output and cannot be combined with `--output`.
+
+Without `--output score`, the score summary stays on stderr, including with
+`--json-only`. Selecting `--output score` prints it once on stdout, with its
+experimental label, formula version, unavailable reason when applicable, and
+unresolved-import and dynamic-import warning counts. This permits
+`--output score > score.txt`.
+Diagnostics, analysis statistics and policy status remain on stderr. Score-only
+runs create no files or directories and ignore `--output-dir`.
+
+Selection controls which artifacts are emitted. JSON retains its complete
+schema, including the score and DAG; the graph remains the Markdown report with
+its score breakdown and findings. All selections use the same full-project
+analysis and scoring. Runs without graph output skip Mermaid rendering and
+transitive reduction. Existing files for unselected outputs are left untouched.
+`--baseline` requires JSON output, where the comparison is recorded.
+
 ## Architecture score
 
 Every run reports an **experimental 0–100 architecture score**, where higher
 means fewer modules involved in cycles and less dependency reach under the
-fixed `architecture-v1` heuristic. It appears in the CLI summary, in the JSON
-`quality` object, and above the diagram in Markdown. No extra flag is needed.
+fixed `architecture-v1` heuristic. By default, it appears in the CLI summary,
+in the JSON `quality` object, and above the diagram in Markdown. No extra flag
+is needed.
 
 The score uses the structural module graph (`architecture_dependencies`),
 regardless of package depth or whether diagram edges are dotted, solid or omitted. Each distinct internal
@@ -333,10 +365,8 @@ comparison reports new/resolved definite cyclic relationships, including certain
 promotions. `--check` checks all current findings; a baseline does not grandfather
 existing violations or replace that check with a score delta.
 
-`--json-only` skips Mermaid rendering and transitive reduction while retaining
-full-project discovery, extraction, resolution, scoring and findings. Existing
-unrequested diagram files are left untouched. Analysing changed files alone
-would miss cross-file cycles.
+All output selections retain full-project discovery, extraction, resolution,
+scoring and findings. Analysing changed files alone would miss cross-file cycles.
 
 ## Development checks
 

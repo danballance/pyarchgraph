@@ -61,12 +61,22 @@ def test_cli_equivalent_forbidden_rules_round_trip_baselines(
 
 
 @pytest.mark.parametrize("operation", ["write", "flush", "fsync", "close"])
-@pytest.mark.parametrize("artifact", [1, 2])
+@pytest.mark.parametrize(
+    ("outputs", "artifact"),
+    [
+        ((), 1),
+        ((), 2),
+        (("json", "score"), 1),
+        (("graph", "score"), 1),
+        (("json", "graph", "score"), 2),
+    ],
+)
 def test_cli_staging_failure_cleans_temporary_files_and_preserves_outputs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operation: str,
+    outputs: tuple[str, ...],
     artifact: int,
 ) -> None:
     source_root = tmp_path / "source"
@@ -119,8 +129,95 @@ def test_cli_staging_failure_cleans_temporary_files_and_preserves_outputs(
     monkeypatch.setattr(cli.tempfile, "NamedTemporaryFile", failing_temporary_file)
     monkeypatch.setattr(cli.os, "fsync", failing_fsync)
 
-    assert main([str(source_root), "--output-dir", str(output_dir)]) == 2
-    assert f"injected {operation} failure" in capsys.readouterr().err
+    options = [option for output in outputs for option in ("--output", output)]
+    assert main([str(source_root), "--output-dir", str(output_dir), *options]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"injected {operation} failure" in captured.err
+    assert (output_dir / "dependency-graph.json").read_text() == "previous JSON\n"
+    assert (output_dir / "dependency-dag.md").read_text() == "previous Markdown\n"
+    assert sorted(path.name for path in output_dir.iterdir()) == [
+        "dependency-dag.md", "dependency-graph.json"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("outputs", "fail_at"),
+    [
+        (("json", "score"), 1),
+        (("graph", "score"), 1),
+        (("json", "graph", "score"), 1),
+        (("json", "graph", "score"), 2),
+    ],
+)
+def test_cli_publication_failure_cleans_staging_and_suppresses_score_stdout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    outputs: tuple[str, ...],
+    fail_at: int,
+) -> None:
+    source = tmp_path / "src"
+    output_dir = tmp_path / "out"
+    _write(source, "a.py", "")
+    previous = {
+        "dependency-graph.json": "previous JSON\n",
+        "dependency-dag.md": "previous Markdown\n",
+    }
+    for name, content in previous.items():
+        _write(output_dir, name, content)
+    original_replace = cli.os.replace
+    published: list[str] = []
+
+    def failing_replace(temporary, destination):
+        if len(published) + 1 == fail_at:
+            raise OSError("injected publication failure")
+        original_replace(temporary, destination)
+        published.append(destination.name)
+
+    monkeypatch.setattr(cli.os, "replace", failing_replace)
+    options = [option for output in outputs for option in ("--output", output)]
+    assert main([str(source), "--output-dir", str(output_dir), *options]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "injected publication failure" in captured.err
+    assert sorted(path.name for path in output_dir.iterdir()) == sorted(previous)
+    for name, content in previous.items():
+        if name in published:
+            assert (output_dir / name).read_text() != content
+        else:
+            assert (output_dir / name).read_text() == content
+    # Publication remains atomic per file; a later failure does not undo JSON.
+    if fail_at == 2:
+        assert published == ["dependency-graph.json"]
+
+
+@pytest.mark.parametrize(
+    "renderer", ["render_json", "render_mermaid_markdown", "render_quality_summary"]
+)
+def test_cli_renders_all_outputs_before_publishing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    renderer: str,
+) -> None:
+    source = tmp_path / "src"
+    output_dir = tmp_path / "out"
+    _write(source, "a.py", "")
+    _write(output_dir, "dependency-graph.json", "previous JSON\n")
+    _write(output_dir, "dependency-dag.md", "previous Markdown\n")
+
+    def fail_render(*args, **kwargs):
+        raise ValueError("injected rendering failure")
+
+    monkeypatch.setattr(cli, renderer, fail_render)
+    assert main([
+        str(source), "--output-dir", str(output_dir),
+        "--output", "json", "--output", "graph", "--output", "score",
+    ]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "injected rendering failure" in captured.err
     assert (output_dir / "dependency-graph.json").read_text() == "previous JSON\n"
     assert (output_dir / "dependency-dag.md").read_text() == "previous Markdown\n"
     assert sorted(path.name for path in output_dir.iterdir()) == [

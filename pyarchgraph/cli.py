@@ -30,8 +30,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pyarchgraph",
         description=(
-            "Statically analyse internal Python imports and emit a raw graph "
-            "plus an SCC-condensed DAG."
+            "Statically analyse internal Python imports and emit JSON data, "
+            "a Mermaid graph report, or an architecture score summary."
         ),
     )
     parser.add_argument(
@@ -44,7 +44,7 @@ def _parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         default=Path("build/pyarchgraph"),
-        help="output directory (default: build/pyarchgraph)",
+        help="file output directory (default: build/pyarchgraph; unused for score only)",
     )
     parser.add_argument(
         "--exclude",
@@ -88,10 +88,20 @@ def _parser() -> argparse.ArgumentParser:
             "every edge"
         ),
     )
-    parser.add_argument(
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument(
+        "--output",
+        choices=("json", "graph", "score"),
+        action="append",
+        help=(
+            "select JSON file, Mermaid Markdown file, or score summary on stdout; "
+            "repeat to combine (default: JSON and graph files, score on stderr)"
+        ),
+    )
+    output_group.add_argument(
         "--json-only",
         action="store_true",
-        help="write evidence JSON without diagram rendering or transitive reduction",
+        help="alias for --output json; skips diagram rendering and transitive reduction",
     )
     parser.add_argument(
         "--project-root",
@@ -135,7 +145,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--baseline",
         type=Path,
-        help="compare against a compatible dependency-graph.json",
+        help="compare against a compatible dependency-graph.json; requires JSON output",
     )
     parser.add_argument(
         "--allow-inventory-change",
@@ -189,25 +199,20 @@ def _stage_write(path: Path, content: str) -> Path:
 
 
 def _write_outputs_atomically(
-    json_path: Path,
-    json_output: str,
-    mermaid_path: Path | None,
-    mermaid_output: str | None,
+    outputs: Sequence[tuple[Path, str]],
 ) -> None:
     """Stage requested artifacts before atomically replacing their final files."""
 
-    staged: list[Path] = []
+    staged: list[tuple[Path, Path]] = []
     try:
-        staged.append(_stage_write(json_path, json_output))
-        if mermaid_path is not None and mermaid_output is not None:
-            staged.append(_stage_write(mermaid_path, mermaid_output))
-        os.replace(staged[0], json_path)
-        staged.pop(0)
-        if staged and mermaid_path is not None:
-            os.replace(staged[0], mermaid_path)
+        for path, content in outputs:
+            staged.append((_stage_write(path, content), path))
+        while staged:
+            temporary, path = staged[0]
+            os.replace(temporary, path)
             staged.pop(0)
     finally:
-        for temporary in staged:
+        for temporary, _ in staged:
             with suppress(OSError):
                 temporary.unlink(missing_ok=True)
 
@@ -215,12 +220,23 @@ def _write_outputs_atomically(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    selected_outputs = set(args.output or ("json", "graph"))
+    if args.json_only:
+        selected_outputs = {"json"}
+    output_paths = {
+        kind: args.output_dir / filename
+        for kind, filename in (
+            ("json", "dependency-graph.json"),
+            ("graph", "dependency-dag.md"),
+        )
+        if kind in selected_outputs
+    }
 
     if not args.source_root.exists():
         parser.error(f"source root does not exist: {args.source_root}")
     if not args.source_root.is_dir():
         parser.error(f"source root is not a directory: {args.source_root}")
-    if args.output_dir.exists() and not args.output_dir.is_dir():
+    if output_paths and args.output_dir.exists() and not args.output_dir.is_dir():
         parser.error(f"output path is not a directory: {args.output_dir}")
     if args.package_depth < MINIMUM_PACKAGE_DEPTH:
         parser.error(
@@ -236,15 +252,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         forbidden.append((source, target))
     if args.allow_inventory_change and args.baseline is None:
         parser.error("--allow-inventory-change requires --baseline")
+    if args.baseline is not None and "json" not in selected_outputs:
+        parser.error("--baseline requires JSON output; add --output json")
 
-    json_path = args.output_dir / "dependency-graph.json"
-    mermaid_path = None if args.json_only else args.output_dir / "dependency-dag.md"
-    for output_path in (json_path, mermaid_path):
-        if (
-            output_path is not None
-            and output_path.exists()
-            and not output_path.is_file()
-        ):
+    for output_path in output_paths.values():
+        if output_path.exists() and not output_path.is_file():
             parser.error(f"output target is not a regular file: {output_path}")
 
     try:
@@ -262,40 +274,42 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             forbidden_dependencies=tuple(forbidden),
         )
-        json_output = render_json(result)
-        if args.baseline is not None:
-            baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
-            if not isinstance(baseline, dict):
-                raise ValueError("incompatible baseline: expected a JSON object")
-            document = json.loads(json_output)
-            document["baseline_comparison"] = compare_baseline(
-                document, baseline, allow_inventory_change=args.allow_inventory_change
-            )
-            json_output = (
-                json.dumps(
-                    document,
-                    sort_keys=True,
-                    indent=2,
-                    ensure_ascii=False,
-                    allow_nan=False,
+        file_outputs: list[tuple[Path, str]] = []
+        if "json" in selected_outputs:
+            json_output = render_json(result)
+            if args.baseline is not None:
+                baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
+                if not isinstance(baseline, dict):
+                    raise ValueError("incompatible baseline: expected a JSON object")
+                document = json.loads(json_output)
+                document["baseline_comparison"] = compare_baseline(
+                    document, baseline, allow_inventory_change=args.allow_inventory_change
                 )
-                + "\n"
-            )
-        mermaid_output = (
-            None
-            if args.json_only
-            else render_mermaid_markdown(
+                json_output = (
+                    json.dumps(
+                        document,
+                        sort_keys=True,
+                        indent=2,
+                        ensure_ascii=False,
+                        allow_nan=False,
+                    )
+                    + "\n"
+                )
+            file_outputs.append((output_paths["json"], json_output))
+        if "graph" in selected_outputs:
+            mermaid_output = render_mermaid_markdown(
                 result,
                 implied_edges=ImpliedEdges(args.implied_edges),
             )
+            file_outputs.append((output_paths["graph"], mermaid_output))
+        score_summary = (
+            f"{render_quality_summary(result.quality)}; "
+            f"{result.quality.unresolved_import_count} unresolved import records, "
+            f"{result.quality.dynamic_import_warning_count} dynamic-import warnings"
         )
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        _write_outputs_atomically(
-            json_path,
-            json_output,
-            mermaid_path,
-            mermaid_output,
-        )
+        if file_outputs:
+            args.output_dir.mkdir(parents=True, exist_ok=True)
+            _write_outputs_atomically(file_outputs)
     except (OSError, ValueError) as exc:
         print(f"pyarchgraph: {exc}", file=sys.stderr)
         return 2
@@ -304,21 +318,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(_format_diagnostic(diagnostic), file=sys.stderr)
 
     cyclic_count = result.quality.metrics.cyclic_component_count
+    publication_summary = (
+        "; wrote " + " and ".join(str(path) for path, _ in file_outputs)
+        if file_outputs
+        else ""
+    )
     print(
         "pyarchgraph: "
         f"{len(result.modules)} modules, "
         f"{len(result.dependencies)} raw edges, "
         f"{cyclic_count} cyclic components, "
-        f"{len(result.diagnostics)} diagnostics; "
-        f"wrote {json_path}" + (f" and {mermaid_path}" if mermaid_path else ""),
+        f"{len(result.diagnostics)} diagnostics{publication_summary}",
         file=sys.stderr,
     )
-    print(
-        f"pyarchgraph: {render_quality_summary(result.quality)}; "
-        f"{result.quality.unresolved_import_count} unresolved import records, "
-        f"{result.quality.dynamic_import_warning_count} dynamic-import warnings",
-        file=sys.stderr,
-    )
+    if "score" in selected_outputs:
+        print(score_summary)
+    else:
+        print(f"pyarchgraph: {score_summary}", file=sys.stderr)
     status = check_status(result)
     print(f"pyarchgraph: policy check: {status}", file=sys.stderr)
     if not result.complete:
