@@ -11,7 +11,7 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 
-from pyarchgraph import analyse
+from pyarchgraph import analyse, render_json
 from pyarchgraph.findings import check_status
 from pyarchgraph.policy import GraphPolicy
 
@@ -48,6 +48,7 @@ def evaluate(project_ids: list[str] | None = None) -> dict:
                 policy=GraphPolicy(**config["graph_policy"]),
                 forbidden_dependencies=tuple(tuple(rule) for rule in rules),
             )
+            cleanup = json.loads(render_json(result))["cleanup"]
             old = previous[(project["id"], variant_id)]
             rows.append(
                 {
@@ -60,6 +61,12 @@ def evaluate(project_ids: list[str] | None = None) -> dict:
                     ],
                     "current_score": result.quality.score,
                     "current_metrics": asdict(result.quality.metrics),
+                    "cleanup_violation_count": cleanup["violation_count"],
+                    "cleanup_possible_violation_count": cleanup[
+                        "possible_violation_count"
+                    ],
+                    "cleanup_counts": cleanup["counts"],
+                    "cleanup_complete": cleanup["cleanup_complete"],
                     "definite_findings": sum(
                         item["certainty"] == "definite" for item in result.findings
                     ),
@@ -108,7 +115,10 @@ def main() -> None:
         return "unavailable" if value is None else f"{value:.4f}"
 
     table = [
-        ["Project / variant", "Reviewed", "Current", "Definite", "Possible", "Check"]
+        [
+            "Project / variant", "Reviewed", "Current", "Debt", "Possible debt",
+            "Definite findings", "Possible findings", "Check",
+        ]
     ]
     for row in report["results"]:
         label = row["project"] + (f"/{row['variant']}" if row["variant"] else "")
@@ -117,6 +127,8 @@ def main() -> None:
                 label,
                 score(row["baseline_score"]),
                 score(row["current_score"]),
+                str(row["cleanup_violation_count"]),
+                str(row["cleanup_possible_violation_count"]),
                 str(row["definite_findings"]),
                 str(row["possible_findings"]),
                 row["check_status"],
@@ -132,10 +144,13 @@ def main() -> None:
             print("  ".join("-" * width for width in widths))
     print()
     print(
-        "Higher scores alone do not indicate a fix: the dilution controls retain definite cycle findings."
+        "Debt counts definite policy violations; possible debt is separate. A lower total alone does not prove a safe edit."
     )
     print(
-        "Findings include cycles and forbidden direct dependencies. needs_review preserves uncertainty."
+        "Debt counts cyclic and forbidden dependencies; cycle findings group components. Zero debt is complete only when the check passes."
+    )
+    print(
+        "Reviewed/current scores remain advisory: padding can raise a score without resolving the original debt."
     )
     print(
         "Manifest graph settings are explicit; tests are excluded unless the run deliberately includes them."

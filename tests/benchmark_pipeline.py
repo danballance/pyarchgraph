@@ -139,6 +139,9 @@ def main() -> None:
                 )
             if not args.with_diagram and (output / "dependency-dag.md").exists():
                 raise RuntimeError("JSON-only CLI unexpectedly rendered a diagram")
+            expected_debt = args.modules if args.case == "cycle" else 0
+            if document["cleanup"]["violation_count"] != expected_debt:
+                raise RuntimeError("Cleanup debt did not match the benchmark graph")
 
     try:
         import resource
@@ -155,6 +158,8 @@ def main() -> None:
                 "imports": import_count,
                 "dependencies": len(document["dependencies"]),
                 "score": document["quality"]["score"],
+                "cleanup_violation_count": document["cleanup"]["violation_count"],
+                "cleanup_work_items": len(document["cleanup"]["work_items"]),
                 "json_only": not args.with_diagram,
                 "cli_seconds": [round(sample, 6) for sample in elapsed_samples],
                 "median_cli_seconds": round(median(elapsed_samples), 6),

@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from pyarchgraph.analysis import DEFAULT_PACKAGE_DEPTH, analyse
+from pyarchgraph.cleanup_comparison import compare_cleanup
 from pyarchgraph.model import View
 from pyarchgraph.projection import MINIMUM_PACKAGE_DEPTH
 from pyarchgraph.model import Diagnostic
@@ -142,10 +143,19 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="exit 3 for definite violations, 4 when review is needed; never gate on score",
     )
-    parser.add_argument(
+    baseline_group = parser.add_mutually_exclusive_group()
+    baseline_group.add_argument(
         "--baseline",
         type=Path,
         help="compare against a compatible dependency-graph.json; requires JSON output",
+    )
+    baseline_group.add_argument(
+        "--cleanup-baseline",
+        type=Path,
+        help=(
+            "compare cleanup debt against a compatible dependency-graph.json; "
+            "requires JSON output"
+        ),
     )
     parser.add_argument(
         "--allow-inventory-change",
@@ -250,10 +260,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "--forbid requires SOURCE:TARGET with nonempty module-name globs"
             )
         forbidden.append((source, target))
-    if args.allow_inventory_change and args.baseline is None:
-        parser.error("--allow-inventory-change requires --baseline")
+    if (
+        args.allow_inventory_change
+        and args.baseline is None
+        and args.cleanup_baseline is None
+    ):
+        parser.error("--allow-inventory-change requires --baseline or --cleanup-baseline")
     if args.baseline is not None and "json" not in selected_outputs:
         parser.error("--baseline requires JSON output; add --output json")
+    if args.cleanup_baseline is not None and "json" not in selected_outputs:
+        parser.error("--cleanup-baseline requires JSON output; add --output json")
 
     for output_path in output_paths.values():
         if output_path.exists() and not output_path.is_file():
@@ -275,16 +291,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             forbidden_dependencies=tuple(forbidden),
         )
         file_outputs: list[tuple[Path, str]] = []
+        cleanup = None
         if "json" in selected_outputs:
             json_output = render_json(result)
-            if args.baseline is not None:
-                baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
+            document = json.loads(json_output)
+            cleanup = document["cleanup"]
+            baseline_path = args.baseline or args.cleanup_baseline
+            if baseline_path is not None:
+                baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
                 if not isinstance(baseline, dict):
                     raise ValueError("incompatible baseline: expected a JSON object")
-                document = json.loads(json_output)
-                document["baseline_comparison"] = compare_baseline(
-                    document, baseline, allow_inventory_change=args.allow_inventory_change
-                )
+                if args.baseline is not None:
+                    document["baseline_comparison"] = compare_baseline(
+                        document,
+                        baseline,
+                        allow_inventory_change=args.allow_inventory_change,
+                    )
+                else:
+                    cleanup["comparison"] = compare_cleanup(
+                        document,
+                        baseline,
+                        allow_inventory_change=args.allow_inventory_change,
+                    )
                 json_output = (
                     json.dumps(
                         document,
@@ -331,6 +359,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{len(result.diagnostics)} diagnostics{publication_summary}",
         file=sys.stderr,
     )
+    if cleanup is not None:
+        counts = cleanup["counts"]
+        coverage_complete = all(
+            cleanup["coverage"][field]
+            for field in (
+                "complete", "scope_valid", "dependency_resolution_complete", "nonempty"
+            )
+        )
+        coverage = "complete" if coverage_complete else "needs review"
+        print(
+            "pyarchgraph: Cleanup debt: "
+            f"{cleanup['violation_count']} known violations "
+            f"({counts['cyclic_dependency']} cyclic dependencies, "
+            f"{counts['forbidden_dependency']} forbidden dependencies); "
+            f"{cleanup['possible_violation_count']} possible violations; "
+            f"coverage {coverage}",
+            file=sys.stderr,
+        )
     if "score" in selected_outputs:
         print(score_summary)
     else:

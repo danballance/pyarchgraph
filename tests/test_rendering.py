@@ -135,7 +135,7 @@ def test_render_json_emits_complete_contract_and_canonical_order() -> None:
 
     assert rendered.endswith("\n") and not rendered.endswith("\n\n")
     assert render_json(result) == rendered
-    assert payload["schema_version"] == "0.3"
+    assert payload["schema_version"] == "0.4"
     assert payload["quality"]["score"] == 85.0
     assert payload["quality"]["formula_version"] == "architecture-v1"
     assert payload["quality"]["unresolved_import_count"] == 1

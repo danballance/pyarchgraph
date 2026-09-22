@@ -263,10 +263,11 @@ raise RuntimeError("target code must never execute")
     document = json.loads(json_bytes)
     markdown = markdown_bytes.decode("utf-8")
 
-    # The public JSON boundary has the complete declared v0.3 shape.
+    # The public JSON boundary has the complete declared v0.4 shape.
     assert set(document) == {
         "schema_version",
         "quality",
+        "cleanup",
         "architecture_dependencies",
         "findings",
         "limitations",
@@ -281,7 +282,7 @@ raise RuntimeError("target code must never execute")
         "dag",
         "diagnostics",
     }
-    assert document["schema_version"] == "0.3"
+    assert document["schema_version"] == "0.4"
     assert document["quality"]["score"] is None
     assert document["quality"]["unavailable_reason"] == "incomplete_analysis"
     assert document["quality"]["metrics"]["module_count"] == 22
@@ -315,6 +316,9 @@ raise RuntimeError("target code must never execute")
     assert provenance["source_root"] == "."
     assert provenance["formula_version"] == document["quality"]["formula_version"]
     assert provenance["graph_policy_version"] == "structural-v1"
+    assert provenance["cleanup_model_version"] == document["cleanup"]["model_version"]
+    assert document["cleanup"]["violation_count"] > 0
+    assert not document["cleanup"]["cleanup_complete"]
     assert provenance["python_version"] == document["analysis"]["python_version"]
     assert provenance["graph_policy"] == {
         "include_type_only": True,

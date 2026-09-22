@@ -14,6 +14,7 @@
         "source_digest": "0000000000000000000000000000000000000000000000000000000000000000",
         "version": "NORMALIZED"
       },
+      "cleanup_model_version": "policy-debt-v1",
       "default_excluded_directories": [
         ".git",
         ".venv",
@@ -60,6 +61,32 @@
   ],
   "check": {
     "status": "pass"
+  },
+  "cleanup": {
+    "cleanup_complete": true,
+    "counts": {
+      "cyclic_dependency": 0,
+      "forbidden_dependency": 0
+    },
+    "coverage": {
+      "complete": true,
+      "dependency_resolution_complete": true,
+      "diagnostics": [],
+      "limitations": [
+        "Static analysis does not prove runtime initialization or the absence of dynamic imports.",
+        "The heuristic score is not a policy threshold; connected additions can dilute it.",
+        "No expected package names were supplied; source-root validation is heuristic."
+      ],
+      "nonempty": true,
+      "scope_valid": true,
+      "unresolved_imports": []
+    },
+    "model_version": "policy-debt-v1",
+    "possible_violation_count": 0,
+    "possible_violation_ids": [],
+    "violation_count": 0,
+    "violations": [],
+    "work_items": []
   },
   "dag": {
     "dependency_first_layers": [
@@ -177,7 +204,7 @@
     "unavailable_reason": null,
     "unresolved_import_count": 0
   },
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "semantics": {
     "architecture_graph": "structural-v1; normalized submodule bases; evidence filters",
     "dag_graph": "architecture_dependencies",

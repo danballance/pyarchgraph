@@ -39,7 +39,8 @@ uv run pyarchgraph . --exclude 'pkg/generated/**' --exclude 'tests/**'
 
 By default, the command writes:
 
-- `dependency-graph.json`, the canonical evidence-rich model and architecture score; and
+- `dependency-graph.json`, the canonical evidence-rich model, cleanup debt and
+  advisory architecture score; and
 - `dependency-dag.md`, a Mermaid `flowchart TD` derived only from that model's
   condensation DAG, with one `subgraph` per dependency-first layer so an edge
   always points down the page, preceded by the architecture score and breakdown.
@@ -79,7 +80,54 @@ schema, including the score and DAG; the graph remains the Markdown report with
 its score breakdown and findings. All selections use the same full-project
 analysis and scoring. Runs without graph output skip Mermaid rendering and
 transitive reduction. Existing files for unselected outputs are left untouched.
-`--baseline` requires JSON output, where the comparison is recorded.
+`--baseline` and `--cleanup-baseline` require JSON output, where the comparison
+is recorded. They cannot be combined.
+
+## Cleanup debt
+
+JSON reports include a `cleanup` object with model version `policy-debt-v1`.
+Its **lower-is-better `violation_count`** measures observed violations of the
+cycle policy and explicitly configured forbidden dependencies:
+
+- Each directed dependency participating in a definite cycle contributes one
+  `cyclic_dependency` violation, including self-imports.
+- Each directed dependency matching one or more forbidden rules contributes one
+  `forbidden_dependency` violation. Overlapping rules count once; an edge that
+  violates both policies contributes two violations.
+- Repeated imports do not increase either count. Clean modules and unrelated
+  dependencies cannot dilute it. No weights or normalization are applied.
+
+`counts` breaks the total down by category. `possible_violation_count` and the
+certainty on each `violations` entry keep uncertain relationships visible
+without including them in the definite total. Certainty is determined per
+dependency: a component can contain both definite and possible cycle violations.
+Violation identities use kind, source module and target module; source locations
+and import spelling are evidence, so a formatting change does not create a new
+violation.
+
+`work_items` group definite cycle violations by strongly connected component and
+forbidden dependencies individually. They identify affected modules and reference
+violation identities, whose records contain matched rules and import evidence.
+Cycle witnesses are bounded lists of violation identities.
+Items are ordered by decreasing definite violation count and then stable
+identity. A witness identifies a cycle to investigate; removing one witness edge
+may leave other cycles in the component.
+
+`coverage` records limitations. Counts remain available for known violations
+when analysis is incomplete or uncertain, and zero does not prove completion.
+`cleanup_complete` is true only when the existing policy check returns `pass`.
+For example, a missing internal target or a nonliteral dynamic import can leave
+the count at zero while requiring review.
+
+This is a count of observed policy violations, not estimated repair effort or a
+general architecture grade. A dense acyclic graph has zero debt unless it breaks
+a configured dependency rule. The experimental `quality.score` remains separate
+and unchanged. JSON-producing CLI runs also print a concise cleanup summary on
+stderr; `--output score` retains its architecture-score stdout contract.
+
+Use the [cleanup comparison workflow](#cleanup-comparisons) to assess edits.
+Inspect every new or uncertain violation before interpreting a lower total;
+this release adds no score threshold, debt budget or automatic cleanup gate.
 
 ## Architecture score
 
@@ -151,15 +199,16 @@ print(quality.metrics.cyclic_module_count)
 print(quality.metrics.reachable_pair_count)
 ```
 
-Package version `0.3.1` emits JSON schema `0.3`. This schema includes
+Package version `0.4.0` emits JSON schema `0.4`. This schema includes `cleanup`,
 `architecture_dependencies`, `findings`, `limitations`, `check`, and analysis
 provenance. The metric is now `largest_cyclic_component_size`: `a ↔ b ↔ c`
 has a three-module SCC but no three-module simple cycle. The deprecated Python
 property `largest_cycle_size` remains an alias; JSON uses only the precise name.
 The arithmetic formula remains `architecture-v1`; structural graph selection
 is independently versioned as `structural-v1`.
-Version 0.3.1 changes import extraction and failure handling without changing
-either identifier. See the [release implementation notes](docs/release-0.3.1.md).
+Version 0.4.0 adds the independently versioned `policy-debt-v1` cleanup model to
+the report and provenance. See the [release notes](docs/release-0.4.0.md) and
+the [earlier implementation notes](docs/release-0.3.1.md).
 
 The dependency-reach signal is informed by
 [propagation-cost research](https://www.hbs.edu/ris/download.aspx?name=13-093.pdf).
@@ -339,7 +388,64 @@ of uncertain findings, dependency resolution, empty inventory or invalid scope.
 Incomplete analysis still returns 1. The JSON `check.status` is `pass`, `fail`,
 or `needs_review`; even `pass` is scoped to the static model and configured rules.
 
-## Baseline comparisons
+## Cleanup comparisons
+
+Capture a baseline using the current analyzer, then compare a behavior-preserving
+edit with the same scope, rules, interpreter and analysis settings:
+
+```console
+uv run pyarchgraph src --project-root . --expect-package app --forbid 'app.presentation*:app.storage*' --output json --output-dir build/cleanup-before
+# Inspect cleanup.work_items, make an edit, and run the project's behavioral tests.
+uv run pytest
+uv run pyarchgraph src --project-root . --expect-package app --forbid 'app.presentation*:app.storage*' --output json --cleanup-baseline build/cleanup-before/dependency-graph.json --output-dir build/cleanup-after
+```
+
+`--cleanup-baseline PATH` requires JSON output: the default outputs,
+`--output json`, or `--json-only`. It cannot be combined with `--baseline`.
+The resulting `cleanup.comparison` derives violations from validated graph and
+import evidence on each side, rather than trusting saved counts.
+
+| Transition | Meaning |
+| --- | --- |
+| `newly_observed` | A definite or possible violation identity absent from the baseline. |
+| `newly_confirmed` | An existing possible violation is now definite. |
+| `lost_certainty` | An existing definite violation is now possible. |
+| `verified_resolved` | A violation disappeared under sufficient current coverage, with no module identities removed. |
+| `disappeared_unverified` | Evidence disappeared without sufficient coverage, or during module removal with its own endpoints retained. |
+| `removed_with_module` | A violation disappeared alongside an endpoint module. |
+| `persistent` | The violation identity and certainty remain unchanged. |
+
+`count_delta` is the current definite count minus the baseline count.
+`has_new_violations` and `needs_review` must be inspected independently of that
+number: fixing several violations while introducing one can produce a negative
+delta. Replacing an exact import with uncertain dynamic evidence is a loss of
+certainty, not a verified repair. Valid incomplete reports can still provide
+limited comparison evidence, with explicit review requirements.
+
+`--allow-inventory-change` permits reviewed module additions, removals and path
+changes with either baseline option. Cleanup comparisons list `added_modules`
+and `removed_modules`; they do not infer renames. Removing an intermediate module
+can hide a cycle between retained endpoints, and a dangling flat import can
+appear external. Therefore any removed module identity prevents verified
+resolution credit for that comparison; observed count changes remain available.
+Baseline compatibility still requires matching analyzer
+identity, interpreter, source root, exclusions, evidence policy, rules and model
+versions. Generate fresh baselines with this release; historical reports are
+not silently migrated across analysis semantics.
+
+For iterative agent work, retain the original campaign baseline for cumulative
+reporting and optionally compare each edit against the preceding iteration.
+Inspect work items, make an edit, run the project's tests, reanalyse, and review
+all transitions before interpreting the total. Keep report directories distinct
+so a later run does not overwrite the baseline. This CLI JSON workflow does not
+add a dedicated Python comparison API.
+
+`--check` continues to evaluate every current finding, including existing debt.
+Neither baseline option grandfathers violations or changes exit codes. Agents
+can investigate known violations with uncertain coverage, but cannot declare
+cleanup complete while `cleanup_complete` is false.
+
+## Existing baseline comparisons
 
 ```console
 uv run pyarchgraph src --project-root . --expect-package app --json-only --output-dir build/before
@@ -353,9 +459,8 @@ relative source root, exclusions, expected packages, collector identity, and rul
 Incompatible baselines are rejected before output replacement. Module additions,
 removals or path changes require explicit `--allow-inventory-change` after review;
 the report lists them. Old schema baselines must be regenerated, not silently
-compared under new import semantics. Version 0.3.1 keeps schema `0.3`, but its
-changed analyser identity and extraction semantics require regenerating 0.3.0
-baselines. Repeated or reordered equivalent forbidden-rule sets produce the same
+compared under new import semantics. Version 0.4.0 requires freshly generated
+schema `0.4` baselines. Repeated or reordered equivalent forbidden-rule sets produce the same
 report and remain baseline-compatible within the same analyser environment.
 
 Comparisons use semantic `(source, target)` dependency identities, so blank lines

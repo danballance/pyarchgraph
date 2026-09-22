@@ -7,6 +7,7 @@ from enum import Enum
 import json
 from typing import Any
 
+from pyarchgraph.cleanup import build_cleanup_report
 from pyarchgraph.graph_ops import essential_edges
 from pyarchgraph.findings import check_status
 from pyarchgraph.model import (
@@ -103,7 +104,7 @@ def _view_json(result: AnalysisResult) -> dict[str, Any]:
 
 
 def _as_json_model(result: AnalysisResult) -> dict[str, Any]:
-    """Convert domain objects to the complete v0.3 JSON boundary model."""
+    """Convert domain objects to the complete v0.4 JSON boundary model."""
 
     modules = sorted(result.modules, key=lambda module: module.id)
     facts = sorted(result.import_facts, key=_fact_sort_key)
@@ -133,8 +134,8 @@ def _as_json_model(result: AnalysisResult) -> dict[str, Any]:
     )
     dag_edges = sorted(result.dag.edges, key=lambda edge: (edge.source, edge.target))
 
-    return {
-        "schema_version": "0.3",
+    document = {
+        "schema_version": "0.4",
         "quality": asdict(result.quality),
         "architecture_dependencies": [
             asdict(edge) for edge in result.architecture_dependencies
@@ -263,10 +264,12 @@ def _as_json_model(result: AnalysisResult) -> dict[str, Any]:
             for diagnostic in sorted(result.diagnostics, key=_diagnostic_sort_key)
         ],
     }
+    document["cleanup"] = build_cleanup_report(document)
+    return document
 
 
 def render_json(result: AnalysisResult) -> str:
-    """Render the complete canonical v0.3 JSON document."""
+    """Render the complete canonical v0.4 JSON document."""
 
     return (
         json.dumps(

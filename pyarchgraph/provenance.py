@@ -9,6 +9,7 @@ import subprocess
 
 import networkx as nx
 
+from pyarchgraph.cleanup import CLEANUP_MODEL_VERSION
 from pyarchgraph.discovery import DEFAULT_EXCLUDED_DIRECTORY_BASENAMES
 from pyarchgraph.model import ImportScope, ImportSyntax, ResolutionKind
 from pyarchgraph.policy import DEFINITE_KINDS, GRAPH_POLICY_VERSION, GraphPolicy
@@ -60,6 +61,7 @@ def build_provenance(
     return {
         "analyser": analyser_identity(),
         "formula_version": FORMULA_VERSION,
+        "cleanup_model_version": CLEANUP_MODEL_VERSION,
         "graph_policy_version": GRAPH_POLICY_VERSION,
         "source_root": source_root,
         "python_version": python_version,
