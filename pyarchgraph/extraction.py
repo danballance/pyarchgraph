@@ -239,6 +239,15 @@ def _arguments(node: ast.arguments) -> tuple[ast.arg, ...]:
 
 
 _COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+# TypeAlias first exists on Python 3.12; an empty tuple matches nothing on 3.11.
+_TYPE_ALIAS = getattr(ast, "TypeAlias", ())
+
+
+def _type_alias_expressions(node: ast.AST) -> Iterable[ast.AST]:
+    """The independently lazy bounds, constraints, defaults, and alias value."""
+    for parameter in node.type_params:
+        yield from ast.iter_child_nodes(parameter)
+    yield node.value
 
 
 def _comprehension_expressions(node: ast.AST) -> Iterable[ast.expr]:
@@ -265,6 +274,7 @@ class _LocalBindings(ast.NodeVisitor):
         self.writes: dict[str, list[str | ast.expr]] = {}
         self.globals: set[str] = set()
         self.nonlocals: set[str] = set()
+        self.deleted_names: set[str] = set()
         self.definitions: list[ast.AST] = []
 
     @property
@@ -277,6 +287,10 @@ class _LocalBindings(ast.NodeVisitor):
     def generic_visit(self, node: ast.AST) -> None:
         for name in _bound_names(node):
             self._record(name)
+            if isinstance(node, ast.ExceptHandler) or (
+                isinstance(node, ast.Name) and isinstance(node.ctx, ast.Del)
+            ):
+                self.deleted_names.add(name)
         super().generic_visit(node)
 
     def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
@@ -304,6 +318,13 @@ class _LocalBindings(ast.NodeVisitor):
     def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802
         self.visit(node.value)
         self._record(node.target.id, node.value)
+
+    def visit_TypeAlias(self, node: ast.AST) -> None:  # noqa: N802
+        # Only the alias object binds here. Its parameters and expression
+        # scopes must not become locals of the containing function or module.
+        for name in _bound_names(node):
+            self._record(name)
+        self.definitions.append(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
         self.definitions.append(node)
@@ -396,7 +417,11 @@ class _ScopeIndex:
         while True:
             changed = False
             for node, bindings in self.bindings.items():
-                inherited = initial.copy() if node is tree else self.outer(node)
+                inherited = (
+                    initial.copy()
+                    if node is tree
+                    else self.outer(node, annotation_scope=isinstance(node, _TYPE_ALIAS))
+                )
                 for name in bindings.globals:
                     inherited[name] = self.summaries.get(tree, {}).get(name, _UNKNOWN)
                 summary = bindings.summary(inherited)
@@ -444,7 +469,10 @@ class _ScopeIndex:
 
     def _add(self, node: ast.AST, parent: ast.AST | None) -> None:
         bindings = _LocalBindings()
-        if isinstance(node, _COMPREHENSIONS):
+        if isinstance(node, _TYPE_ALIAS):
+            for expression in _type_alias_expressions(node):
+                bindings.visit(expression)
+        elif isinstance(node, _COMPREHENSIONS):
             for expression in _comprehension_expressions(node):
                 bindings.visit(expression)
             if isinstance(node, ast.GeneratorExp):
@@ -467,10 +495,16 @@ class _ScopeIndex:
         for child in bindings.definitions:
             self._add(child, node)
 
-    def outer(self, node: ast.AST) -> _Aliases:
+    def outer(self, node: ast.AST, *, annotation_scope: bool = False) -> _Aliases:
         parent = self.parents[node]
+        if annotation_scope:
+            # Lazy alias expressions can see the directly enclosing class,
+            # including attributes bound after the alias statement.
+            return self.summaries.get(parent, {}).copy()
         parameters: set[str] = set()
-        while isinstance(parent, ast.ClassDef):
+        while isinstance(parent, ast.ClassDef) or isinstance(parent, _TYPE_ALIAS):
+            # Ordinary scopes nested inside an alias capture its parameters,
+            # but must not inherit class attributes through its summary.
             for parameter in getattr(parent, "type_params", ()):
                 parameters.update(_bound_names(parameter))
             parent = self.parents[parent]
@@ -689,18 +723,52 @@ class _ImportVisitor(ast.NodeVisitor):
                 )
 
     def visit_TypeAlias(self, node: ast.AST) -> None:  # noqa: N802
-        self.diagnostics.append(
-            Diagnostic(
-                severity=Severity.ERROR,
-                code="unsupported_annotation_scope",
-                message="Lazy type alias expressions are not analysed.",
-                path=self._module.path,
-                line=node.lineno,
-                column=node.col_offset,
-            )
-        )
         for name in _bound_names(node):
             self._aliases.pop(name, None)
+        inherited_aliases = self._aliases
+        inherited_class_outer = self._class_outer_aliases
+        inherited_class_mutations = self._class_outer_mutations
+        inherited_mutations = self._mutations
+        inherited_comprehension = self._comprehension_writes
+
+        # Evaluation may happen after any surrounding declaration or rebinding.
+        # Keep the alias's own name in that surrounding summary for recursion
+        # and later writes, rather than treating its RHS as an eager assignment.
+        self._aliases = self._index.summaries[node].copy()
+        self._mutations = self._index.mutations[node].copy()
+        self._class_outer_aliases = self._index.outer(node)
+        self._class_outer_mutations = self._mutations.copy()
+        self._comprehension_writes = []
+        parent = self._index.parents[node]
+        if isinstance(parent, ast.ClassDef):
+            # An alias can be evaluated inside the class before a later class
+            # attribute shadows an outer name. Deletion can expose that outer
+            # name again, even when the attribute exists at alias creation.
+            self._aliases = _merge_aliases(self._aliases, inherited_aliases)
+            for name in self._index.bindings[parent].deleted_names:
+                self._aliases[name] = self._aliases.get(name, _UNKNOWN) | (
+                    self._class_outer_aliases.get(name, _UNKNOWN)
+                )
+        for parameter in node.type_params:
+            for name in _bound_names(parameter):
+                # All parameters, including later ones, shadow loaders in every
+                # bound/default and in ordinary scopes nested inside the alias.
+                self._aliases.pop(name, None)
+                self._mutations.pop(name, None)
+                self._class_outer_aliases.pop(name, None)
+                self._class_outer_mutations.pop(name, None)
+        try:
+            # Direct annotation expressions keep their containing import scope
+            # and TYPE_CHECKING context; nested lambdas/comprehensions establish
+            # their normal local scopes. No source expressions are evaluated.
+            for expression in _type_alias_expressions(node):
+                self.visit(expression)
+        finally:
+            self._aliases = inherited_aliases
+            self._class_outer_aliases = inherited_class_outer
+            self._class_outer_mutations = inherited_class_mutations
+            self._mutations = inherited_mutations
+            self._comprehension_writes = inherited_comprehension
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
         self._visit_local_namespace(node)

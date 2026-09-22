@@ -274,9 +274,25 @@ declarations, closure bindings and writes through `global` or `nonlocal`.
 Decorators and defaults retain their containing-scope evaluation; methods and
 nested class bodies skip enclosing class attributes when resolving free names.
 Method annotations can see their class namespace. On Python 3.12 and newer,
-generic type parameters shadow aliases in their relevant scopes. Type-parameter
-bounds and defaults, and lazy `type` alias expressions, are currently unsupported
-and produce the error diagnostic `unsupported_annotation_scope`.
+generic type parameters shadow aliases in their relevant scopes without leaking
+into the containing namespace.
+
+Modern type aliases (`type Name = ...`) are supported, including generic aliases,
+bounds and constraints, and type-parameter defaults. Their lazy expressions use
+conservative binding summaries that include later declarations and rebindings.
+Direct alias expressions can see enclosing class attributes; nested lambdas and
+comprehension bodies follow their own scope rules. Recognized dynamic imports in
+these expressions retain warnings and uncertain evidence. A type alias alone
+does not make an import typing-only; the recognized `TYPE_CHECKING` guard rules
+still apply. Direct alias expressions retain their containing module/local
+classification; nested lambdas and comprehension bodies are local. Ordinary type
+references do not create import edges.
+
+Source syntax must be supported by the Python interpreter running PyArchGraph:
+type aliases require Python 3.12 or newer, and type-parameter defaults require
+Python 3.13 or newer. Python 3.11 remains supported for older source syntax.
+Bounds and defaults on generic functions and classes remain unsupported and
+produce the error diagnostic `unsupported_annotation_scope`.
 
 This is a static approximation, not execution or symbolic evaluation. It can
 retain a loader that a particular runtime path never calls. Arbitrary attribute

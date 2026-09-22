@@ -185,7 +185,6 @@ def test_nested_paths_and_binding_expressions_keep_runtime_imports(
     [
         'def f[T: load("b")]():\n    pass\n',
         'class C[T: load("b")]:\n    pass\n',
-        'type Alias[T] = load("b")\n',
     ],
 )
 def test_unsupported_lazy_annotation_scopes_are_explicit(tmp_path: Path, source: str):
