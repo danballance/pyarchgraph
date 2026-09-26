@@ -1,14 +1,14 @@
 # Dependency scenarios
 
 The 25 projects under `projects/` are committed source fixtures covering clean
-architecture, cycles, boundary violations, and explicit import resolution. The test
-harness reads their source; it never imports or executes the applications.
+architecture, cycles, and explicit import resolution. The test harness reads
+their source; it never imports or executes the applications.
 
 [manifest.json](manifest.json) defines all 28 runs, including source roots,
-exclusions, forbidden dependencies, expected exit codes, module/dependency
-counts, and findings. Every variant has a complete configuration. The three
-variants exercise explicit test exclusion, an incorrect source root, and a
-documentation edit that moves import locations.
+exclusions, expected exit codes, module/dependency counts, and findings. Every
+variant has a complete configuration. The three variants exercise explicit test
+exclusion, an incorrect source root, and a documentation edit that moves import
+locations.
 
 Run the acceptance tests and print the complete expected/actual matrix:
 
@@ -32,7 +32,7 @@ A single scenario can also be checked directly:
 
 ```sh
 .venv/bin/python -m pyarchgraph examples/projects/src_root_hazard/src
-.venv/bin/python -m pyarchgraph examples/projects/dense_ordered_dag --forbid presentation:repository
+.venv/bin/python -m pyarchgraph examples/projects/dense_ordered_dag
 ```
 
 Reports go to stdout. Exit `0` means no blocking findings; exit `1` means
@@ -43,7 +43,7 @@ explanation on stderr and no partial JSON report.
 
 | Project | Expected result |
 | --- | --- |
-| `layered_service` | Pass: four legitimate layers, with no forbidden presentation-to-repository shortcut. |
+| `layered_service` | Pass: four legitimate layers form an acyclic graph. |
 | `ports_and_adapters` | Pass: the workflow consumes a protocol; composition selects infrastructure. |
 | `definite_cycle` | Fail: two exact imports form a definite cycle. |
 | `self_import` | Fail: one module imports itself, with a one-edge witness. |
@@ -51,7 +51,7 @@ explanation on stderr and no partial JSON report.
 | `cycle_with_49_pairs` | Fail: 49 unrelated dependency pairs cannot conceal the original cycle. |
 | `cycle_with_test_padding` | Fail in both runs: tests are always excluded, leaving two modules and two dependencies. |
 | `cycle_with_isolated_modules` | Fail: isolated modules cannot conceal the original cycle. |
-| `dense_ordered_dag` | Fail: an acyclic graph violates the configured presentation-to-repository rule. |
+| `dense_ordered_dag` | Pass: six direct dependencies among four modules remain acyclic. |
 | `spelling_relative` | Pass: relative child imports have the same architecture as the absolute spelling. |
 | `spelling_absolute` | Pass: absolute spelling produces the same dependency count. |
 | `shadowed_package_attribute` | Fail: a possible cycle remains visible without claiming it is definite. |
@@ -69,7 +69,7 @@ explanation on stderr and no partial JSON report.
 | `legitimate_package_reexport` | Pass: public package APIs retain dependencies through initializers. |
 | `location_only_edit` | Fail in both runs: documentation moves evidence lines without changing semantic findings. |
 
-The complete corpus expects **9 passes, 18 finding failures, and 1 analysis
+The complete corpus expects **10 passes, 17 finding failures, and 1 analysis
 error**. Tests additionally check source locations, bounded cycle witnesses,
 normalization, preserved import evidence, and equivalent graphs.
 

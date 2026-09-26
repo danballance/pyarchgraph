@@ -1,8 +1,7 @@
 # pyarchgraph
 
-Check a Python project's explicit import statements for cycles, forbidden
-dependencies, and unresolved internal imports. Project code is parsed, never
-executed.
+Check a Python project's explicit import statements for cycles and unresolved
+internal imports. Project code is parsed, never executed.
 
 ## Run
 
@@ -28,17 +27,14 @@ repository root for a flat layout, or `src` for a source layout. Passing the
 package directory itself is not supported. A recognizable `src.pkg`/`pkg`
 mismatch is an error; the tool does not discover or correct the root for you.
 
-There are two options:
+Use exclusions to omit generated code or other directories:
 
 ```console
-uv run pyarchgraph src --exclude 'app/generated/**' --forbid 'app.presentation*:app.storage*'
+uv run pyarchgraph src --exclude 'app/generated/**'
 ```
 
-- `--exclude GLOB` excludes a POSIX-relative file or directory pattern. Repeat
-  it to combine exclusions. Matching uses `pathlib.PurePosixPath.match`.
-- `--forbid SOURCE:TARGET` forbids a direct import between case-sensitive dotted
-  module-name globs. Repeat it to add rules. Overlapping rules produce one
-  finding per dependency, listing every matching rule.
+`--exclude GLOB` excludes a POSIX-relative file or directory pattern. Repeat
+it to combine exclusions. Matching uses `pathlib.PurePosixPath.match`.
 
 Directories named `tests`, files named `test_*.py` or `*_test.py`, and the usual
 `.git`, `.venv`, `venv`, `__pycache__`, `build`, and `dist` directories are always
@@ -81,8 +77,6 @@ Every entry in `findings` prevents a pass:
   definite cycles, and one bounded cycle witness. A definite witness takes
   precedence; a possible witness retains its uncertainty. The component size
   is not a claim about the length of a simple cycle.
-- `forbidden_dependency`: a definite or possible dependency matching a boundary
-  rule, with the matched rules and import evidence.
 - `unresolved_import`: a missing internal target or an escaping relative import.
 
 Evidence includes the original import text where available, a path relative to
@@ -105,11 +99,11 @@ probable relationship because an initializer could bind an attribute with the
 same name. Independent package imports and legitimate re-exports retain their
 package dependencies.
 
-Harmless probable relationships do not prevent a pass. A possible cycle or
-forbidden dependency does. Valid namespace-package bases and external imports
-are not missing internal targets. Unknown top-level names are treated as
-external; the tool cannot distinguish every misspelled import from an external
-package without additional knowledge.
+Harmless probable relationships do not prevent a pass. A possible cycle does.
+Valid namespace-package bases and external imports are not missing internal
+targets. Unknown top-level names are treated as external; the tool cannot
+distinguish every misspelled import from an external package without additional
+knowledge.
 
 Calls to `importlib.import_module()`, `__import__()`, and aliases of these
 functions produce no dependencies or findings. Surrounding explicit import
@@ -133,7 +127,6 @@ try:
     report: AnalysisReport = analyse(
         Path("src"),
         excludes=("app/generated/**",),
-        forbidden_dependencies=(("app.presentation*", "app.storage*"),),
     )
 except AnalysisError as error:
     print(error)
@@ -146,6 +139,10 @@ The frozen report exposes the same fields as JSON. Invalid option values raise
 `ValueError` subclass. There is no score, diagram, baseline, output selection,
 or configurable evidence policy in version 0.5.1.
 
+Dependency boundary rules have been removed. The former `--forbid` option is
+an unknown argument (exit `2`), and passing `forbidden_dependencies` to
+`analyse()` raises `TypeError`.
+
 ## Verification
 
 ```console
@@ -155,7 +152,7 @@ uv run pytest -q
 ```
 
 The [example corpus](examples/README.md) covers 25 projects and 28 runs. The
-manifest explicitly expects nine passes, 18 findings reports, and one analysis
+manifest explicitly expects ten passes, 17 findings reports, and one analysis
 error. The evaluator runs the real CLI and fails if any expectation differs.
 Fixture applications are never imported or executed. Historical reviewed
 measurements remain archival; their obsolete scores do not specify current
@@ -166,4 +163,4 @@ Its integration suite also runs all 28 examples through that adapter. Version
 0.5.1 limits analysis to explicit import statements and retains JSON schema
 `0.5` and the existing exit codes. Update the pinned pyarchgraph revision in
 Checksmith and consuming configurations together. The invocation is simply
-`pyarchgraph .` (or `pyarchgraph src`), plus any exclusions and boundary rules.
+`pyarchgraph .` (or `pyarchgraph src`), plus any exclusions.
