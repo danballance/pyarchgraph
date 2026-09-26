@@ -35,7 +35,6 @@ def analyse(
     source_root: Path,
     *,
     excludes: tuple[str, ...] = (),
-    forbidden_dependencies: tuple[tuple[str, str], ...] = (),
 ) -> AnalysisReport:
     """Check explicit import statements without executing project code.
 
@@ -48,14 +47,6 @@ def analyse(
     root = Path(source_root)
     if not root.is_dir():
         raise AnalysisError("source_root must be an existing directory")
-    if any(
-        len(rule) != 2 or any(not pattern or ":" in pattern for pattern in rule)
-        for rule in forbidden_dependencies
-    ):
-        raise ValueError(
-            "forbidden dependencies require two nonempty module-name globs"
-        )
-    rules = tuple(sorted(set(forbidden_dependencies)))
     effective_excludes = tuple(sorted(set(excludes) | set(TEST_EXCLUDES)))
     discovery = discover_modules(root, excludes=effective_excludes)
 
@@ -101,9 +92,6 @@ def analyse(
         module_count=len(modules),
         dependency_count=len(structural),
         findings=build_findings(
-            structural,
-            facts,
-            resolution.unresolved_imports,
-            rules,
+            structural, facts, resolution.unresolved_imports
         ),
     )

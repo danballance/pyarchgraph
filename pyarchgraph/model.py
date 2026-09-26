@@ -148,16 +148,6 @@ class CycleFinding:
 
 
 @dataclass(frozen=True, slots=True)
-class ForbiddenDependencyFinding:
-    certainty: Literal["definite", "possible"]
-    rules: tuple[tuple[str, str], ...]
-    witness: tuple[FindingDependency, ...]
-    kind: Literal["forbidden_dependency"] = field(
-        default="forbidden_dependency", init=False
-    )
-
-
-@dataclass(frozen=True, slots=True)
 class ImportFinding:
     kind: Literal["unresolved_import"]
     source: str
@@ -167,7 +157,7 @@ class ImportFinding:
     evidence: tuple[EvidenceLocation, ...]
 
 
-Finding = CycleFinding | ForbiddenDependencyFinding | ImportFinding
+Finding = CycleFinding | ImportFinding
 
 
 @dataclass(frozen=True, slots=True)

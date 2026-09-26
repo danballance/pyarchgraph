@@ -1,7 +1,5 @@
 """Check the structural import graph and explain each blocking concern."""
 
-from fnmatch import fnmatchcase
-
 import networkx as nx
 
 from pyarchgraph.model import (
@@ -10,7 +8,6 @@ from pyarchgraph.model import (
     EvidenceLocation,
     Finding,
     FindingDependency,
-    ForbiddenDependencyFinding,
     ImportFact,
     ImportFinding,
     ResolutionKind,
@@ -39,11 +36,10 @@ def build_findings(
     dependencies: tuple[DependencyEdge, ...],
     facts: tuple[ImportFact, ...],
     unresolved_imports: tuple[UnresolvedImport, ...],
-    forbidden_dependencies: tuple[tuple[str, str], ...],
 ) -> tuple[Finding, ...]:
     """Build two graphs once, with one bounded witness per cyclic component.
 
-    Probable edges matter only when they participate in a violation. Missing
+    Probable edges matter only when they participate in a cycle. Missing
     targets independently identify gaps in explicit import resolution.
     """
 
@@ -102,20 +98,6 @@ def build_findings(
                 ),
             )
         )
-    for pair in sorted(by_pair):
-        matched = tuple(
-            rule
-            for rule in forbidden_dependencies
-            if fnmatchcase(pair[0], rule[0]) and fnmatchcase(pair[1], rule[1])
-        )
-        if matched:
-            findings.append(
-                ForbiddenDependencyFinding(
-                    certainty="definite" if definite.has_edge(*pair) else "possible",
-                    rules=matched,
-                    witness=(dependency(pair, definite_only=False),),
-                )
-            )
     for unresolved in unresolved_imports:
         if unresolved.reason is UnresolvedReason.NAMESPACE_BASE_UNMODELLED:
             continue
