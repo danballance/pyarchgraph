@@ -22,7 +22,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="pyarchgraph",
         allow_abbrev=False,
-        description="Check Python imports for cycles, forbidden dependencies and unresolved concerns.",
+        description="Check Python import statements for cycles, forbidden dependencies and unresolved imports.",
     )
     parser.add_argument(
         "source_root",

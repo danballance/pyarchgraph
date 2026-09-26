@@ -21,7 +21,7 @@ def _module(name: str) -> SourceModule:
 
 def _sources(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "broken.py").write_text("import target\n__import__('target')\n")
+    (root / "broken.py").write_text("import target\nimport another\n")
     (root / "good.py").write_text("import target\n")
     (root / "target.py").write_text("")
 
@@ -37,19 +37,16 @@ def _inject_limit(monkeypatch: pytest.MonkeyPatch, stage: str) -> None:
 
         monkeypatch.setattr(extraction.ast, "parse", parse)
     else:
-        original_visit = extraction._ImportVisitor.visit
+        original_walk = extraction.ast.walk
 
-        def visit(visitor, node):
-            result = original_visit(visitor, node)
-            if visitor._module.id == "broken" and isinstance(node, ast.Module):
-                # Simulate exhaustion after the visitor has already collected
-                # facts and a dynamic warning from the failing file.
-                assert visitor.facts
-                assert visitor.diagnostics
-                raise RecursionError("injected traversal limit")
-            return result
+        def walk(tree):
+            for node in original_walk(tree):
+                yield node
+                if isinstance(node, ast.Import) and node.names[0].name == "another":
+                    # Exhaust traversal after collecting partial import evidence.
+                    raise RecursionError("injected traversal limit")
 
-        monkeypatch.setattr(extraction._ImportVisitor, "visit", visit)
+        monkeypatch.setattr(extraction.ast, "walk", walk)
 
 
 @pytest.mark.parametrize("stage", ["parse", "traversal"])
@@ -87,7 +84,7 @@ def test_cli_analysis_limit_emits_no_partial_report(
     assert "Traceback" not in captured.err
 
 
-def test_valid_long_expression_is_analysed_or_explicitly_incomplete(
+def test_valid_long_expression_does_not_require_recursive_traversal(
     tmp_path: Path,
 ) -> None:
     source = "value = " + "+".join(["1"] * 800) + "\nimport other\n"
@@ -98,16 +95,11 @@ def test_valid_long_expression_is_analysed_or_explicitly_incomplete(
 
     result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
 
-    pairs = [(fact.source, fact.base_module) for fact in result.facts]
-    assert ("good", "other") in pairs
-    if not result.diagnostics:
-        assert ("long", "other") in pairs
-        assert result.diagnostics == ()
-    else:
-        assert pairs == [("good", "other")]
-        assert [(item.code, item.path) for item in result.diagnostics] == [
-            ("source_analysis_limit", "long.py")
-        ]
+    assert result.diagnostics == ()
+    assert [(fact.source, fact.base_module) for fact in result.facts] == [
+        ("good", "other"),
+        ("long", "other"),
+    ]
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires POSIX named pipes")
@@ -150,3 +142,36 @@ def test_direct_collector_accepts_regular_files_and_file_symlinks(
     assert [(fact.source, fact.base_module) for fact in result.facts] == [
         ("source", "target")
     ]
+
+
+def test_unreadable_source_fails_collection_analysis_and_cli(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _sources(tmp_path)
+    original_open = extraction.tokenize.open
+
+    def open_source(path):
+        if Path(path).name == "broken.py":
+            raise PermissionError("source is unreadable")
+        return original_open(path)
+
+    monkeypatch.setattr(extraction.tokenize, "open", open_source)
+
+    result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
+    assert [(fact.source, fact.base_module) for fact in result.facts] == [
+        ("good", "target")
+    ]
+    assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
+        ("source_read_error", "broken.py", Severity.ERROR)
+    ]
+    with pytest.raises(AnalysisError, match="source_read_error"):
+        analyse(tmp_path)
+
+    assert main([str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "source_read_error" in captured.err
+    assert "broken.py" in captured.err
+    assert "Traceback" not in captured.err

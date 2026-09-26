@@ -580,37 +580,29 @@
       "id": "dynamic_literal",
       "title": "Direct literal dynamic imports",
       "category": "warning",
-      "intent": "The literal plugin target is statically visible in importlib.import_module and __import__. Record targets or explicit unsupported evidence rather than treating a zero-edge graph as dependency-free.",
+      "intent": "Dynamic calls with literal targets produce no dependencies or findings. The explicit plugin-to-loader import remains, but the dynamic return relationship is outside coverage.",
       "source_root": ".",
       "exclusions": [],
       "forbidden_dependencies": [],
       "expected": {
-        "outcome": "fail",
-        "exit_code": 1,
+        "outcome": "pass",
+        "exit_code": 0,
         "module_count": 2,
-        "dependency_count": 2,
-        "findings": [
-          {
-            "kind": "cycle",
-            "certainty": "possible",
-            "members": [
-              "loader",
-              "plugin"
-            ],
-            "definite_members": []
-          },
-          {
-            "kind": "dynamic_import",
-            "source": "loader",
-            "requested": "plugin",
-            "code": "dynamic_import_ignored"
-          },
-          {
-            "kind": "dynamic_import",
-            "source": "loader",
-            "requested": "plugin",
-            "code": "dynamic_import_ignored"
-          }
+        "dependency_count": 1,
+        "findings": []
+      },
+      "structural": {
+        "absent_dependencies": [
+          [
+            "loader",
+            "plugin"
+          ]
+        ],
+        "required_dependencies": [
+          [
+            "plugin",
+            "loader"
+          ]
         ]
       }
     },
@@ -618,34 +610,23 @@
       "id": "dynamic_aliases",
       "title": "Aliased dynamic import functions",
       "category": "warning",
-      "intent": "Straightforward importlib module aliases and imported function aliases should be recognised. Literal plugin targets are available without executing any source.",
+      "intent": "Aliased dynamic calls produce no dependencies or findings. Explicit importlib imports are still collected as external imports.",
       "source_root": ".",
       "exclusions": [],
       "forbidden_dependencies": [],
       "expected": {
-        "outcome": "fail",
-        "exit_code": 1,
+        "outcome": "pass",
+        "exit_code": 0,
         "module_count": 2,
-        "dependency_count": 1,
-        "findings": [
-          {
-            "kind": "dynamic_import",
-            "source": "loader",
-            "requested": "plugin",
-            "code": "dynamic_import_ignored"
-          },
-          {
-            "kind": "dynamic_import",
-            "source": "loader",
-            "requested": "plugin",
-            "code": "dynamic_import_ignored"
-          },
-          {
-            "kind": "dynamic_import",
-            "source": "loader",
-            "requested": "plugin",
-            "code": "dynamic_import_ignored"
-          }
+        "dependency_count": 0,
+        "findings": []
+      },
+      "structural": {
+        "absent_dependencies": [
+          [
+            "loader",
+            "plugin"
+          ]
         ]
       }
     },
@@ -653,28 +634,23 @@
       "id": "dynamic_nonliteral",
       "title": "Configuration-selected dynamic imports",
       "category": "warning",
-      "intent": "A runtime-selected plugin name cannot be resolved from its call expression. Both module and function aliases need a visible warning and must not claim exhaustive dependency knowledge.",
+      "intent": "Runtime-selected dynamic calls produce no dependencies or findings. Explicit importlib imports are still collected as external imports; dynamically introduced dependencies are outside coverage.",
       "source_root": ".",
       "exclusions": [],
       "forbidden_dependencies": [],
       "expected": {
-        "outcome": "fail",
-        "exit_code": 1,
+        "outcome": "pass",
+        "exit_code": 0,
         "module_count": 2,
         "dependency_count": 0,
-        "findings": [
-          {
-            "kind": "dynamic_import",
-            "source": "loader",
-            "requested": null,
-            "code": "dynamic_import_ignored"
-          },
-          {
-            "kind": "dynamic_import",
-            "source": "loader",
-            "requested": null,
-            "code": "dynamic_import_ignored"
-          }
+        "findings": []
+      },
+      "structural": {
+        "absent_dependencies": [
+          [
+            "loader",
+            "plugin"
+          ]
         ]
       }
     },

@@ -15,7 +15,7 @@ import pytest
 from examples import evaluate
 from pyarchgraph.discovery import discover_modules
 from pyarchgraph.extraction import AstImportFactSource
-from pyarchgraph.model import ImportScope, ImportSyntax, UnresolvedReason
+from pyarchgraph.model import ImportSyntax, UnresolvedReason
 from pyarchgraph.resolution import architecture_dependencies, resolve_imports
 
 EXAMPLES = evaluate.EXAMPLES
@@ -91,7 +91,6 @@ def _assert_evidence(evidence, project_id):
         "exact_module",
         "exact_base",
         "probable_submodule",
-        "dynamic_literal",
     }
 
 
@@ -109,7 +108,7 @@ def _assert_finding_contract(finding, project_id):
             for evidence in edge["evidence"]:
                 _assert_evidence(evidence, project_id)
     else:
-        assert kind in {"unresolved_import", "dynamic_import"}
+        assert kind == "unresolved_import"
         assert set(finding) == {
             "kind",
             "source",
@@ -135,8 +134,8 @@ def test_manifest_preserves_every_project_and_run():
         (item["project"], item["variant"]) for item in BASELINE["observations"]
     }
     outcomes = [config["expected"]["outcome"] for _, _, config in evaluate.iter_runs()]
-    assert outcomes.count("pass") == 6
-    assert outcomes.count("fail") == 21
+    assert outcomes.count("pass") == 9
+    assert outcomes.count("fail") == 18
     assert outcomes.count("error") == 1
     for project_id, variant_id in RUNS:
         config = _configuration(project_id, variant_id)
@@ -237,9 +236,15 @@ def test_submodule_spelling_preserves_architecture_and_original_syntax():
 
 def test_local_and_typing_only_imports_always_contribute_to_cycles():
     typing_collection = _structure("type_only_cycle")[0]
-    assert sum(fact.type_only for fact in typing_collection.facts) == 2
+    assert {
+        (fact.source, fact.base_module, fact.line)
+        for fact in typing_collection.facts
+        if fact.base_module in {"customers", "orders"}
+    } == {("customers", "orders", 5), ("orders", "customers", 5)}
     local_collection = _structure("local_import_cycle")[0]
-    assert all(fact.scope is ImportScope.LOCAL for fact in local_collection.facts)
+    assert {
+        (fact.source, fact.base_module, fact.line) for fact in local_collection.facts
+    } == {("cache", "report", 3), ("report", "cache", 5)}
     for name in ("type_only_cycle", "local_import_cycle"):
         assert _report(name)["dependency_count"] == 2
         assert len(_cycles(name)) == 1
@@ -256,10 +261,10 @@ def test_duplicate_import_sites_preserve_evidence_without_inflating_edge_count()
     assert [item["line"] for item in service_edge["evidence"]] == [3, 5]
     collection, _, _ = _structure("mixed_import_evidence")
     assert {
-        fact.type_only
+        (fact.line, fact.source_segment)
         for fact in collection.facts
         if fact.source == "service" and fact.base_module == "model"
-    } == {True, False}
+    } == {(3, "import model"), (5, "import model as annotation_model")}
 
 
 @pytest.mark.parametrize(
@@ -320,35 +325,30 @@ def test_missing_targets_are_distinct_from_valid_namespace_bases():
 
 
 @pytest.mark.parametrize(
-    "project_id,lines",
+    "project_id,explicit_import_lines",
     [
-        ("dynamic_literal", [5, 8]),
-        ("dynamic_aliases", [7, 10, 13]),
-        ("dynamic_nonliteral", [6, 9]),
+        ("dynamic_literal", [2]),
+        ("dynamic_aliases", [2, 3, 4]),
+        ("dynamic_nonliteral", [2, 3]),
     ],
 )
-def test_each_recognized_dynamic_call_remains_visible(project_id, lines):
-    findings = [
-        finding
-        for finding in _report(project_id)["findings"]
-        if finding["kind"] == "dynamic_import"
-    ]
-    assert (
-        sorted(
-            evidence["line"] for finding in findings for evidence in finding["evidence"]
-        )
-        == lines
-    )
+def test_dynamic_calls_add_no_dependencies_or_findings(project_id, explicit_import_lines):
+    assert _report(project_id)["findings"] == []
+    assert _completed(project_id).returncode == 0
+    collection, resolution, _ = _structure(project_id)
+    assert not collection.diagnostics
+    assert [
+        fact.line for fact in collection.facts if fact.source == "loader"
+    ] == explicit_import_lines
     assert all(
-        finding["evidence"][0]["path"] == f"examples/projects/{project_id}/loader.py"
-        for finding in findings
+        fact.syntax in {ImportSyntax.IMPORT, ImportSyntax.IMPORT_FROM}
+        for fact in collection.facts
     )
-    literals = {
-        fact.base_module
-        for fact in _structure(project_id)[0].facts
-        if fact.syntax is ImportSyntax.DYNAMIC_IMPORT
-    }
-    assert literals == (set() if project_id == "dynamic_nonliteral" else {"plugin"})
+    assert {item.requested for item in resolution.external_imports} == {"importlib"}
+    expected_pairs = (
+        {("plugin", "loader")} if project_id == "dynamic_literal" else set()
+    )
+    assert _pairs(project_id) == expected_pairs
 
 
 def test_documentation_edits_preserve_semantic_findings_and_update_locations():

@@ -21,19 +21,12 @@ class Severity(str, Enum):
 class ImportSyntax(str, Enum):
     IMPORT = "import"
     IMPORT_FROM = "import_from"
-    DYNAMIC_IMPORT = "dynamic_import"
-
-
-class ImportScope(str, Enum):
-    MODULE = "module"
-    LOCAL = "local"
 
 
 class ResolutionKind(str, Enum):
     EXACT_MODULE = "exact_module"
     EXACT_BASE = "exact_base"
     PROBABLE_SUBMODULE = "probable_submodule"
-    DYNAMIC_LITERAL = "dynamic_literal"
 
 
 class ExternalClassification(str, Enum):
@@ -72,8 +65,6 @@ class ImportFact:
     as_name: str | None
     bound_name: str
     relative_level: int
-    scope: ImportScope
-    type_only: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +161,7 @@ class ForbiddenDependencyFinding:
 
 @dataclass(frozen=True, slots=True)
 class ImportFinding:
-    kind: Literal["unresolved_import", "dynamic_import"]
+    kind: Literal["unresolved_import"]
     source: str
     requested: str | None
     code: str

@@ -7,16 +7,13 @@ import networkx as nx
 from pyarchgraph.model import (
     CycleFinding,
     DependencyEdge,
-    Diagnostic,
     EvidenceLocation,
     Finding,
     FindingDependency,
     ForbiddenDependencyFinding,
     ImportFact,
     ImportFinding,
-    ImportSyntax,
     ResolutionKind,
-    SourceModule,
     UnresolvedImport,
     UnresolvedReason,
 )
@@ -41,15 +38,13 @@ def _location(fact: ImportFact, kind: ResolutionKind | None = None) -> EvidenceL
 def build_findings(
     dependencies: tuple[DependencyEdge, ...],
     facts: tuple[ImportFact, ...],
-    modules: tuple[SourceModule, ...],
     unresolved_imports: tuple[UnresolvedImport, ...],
-    diagnostics: tuple[Diagnostic, ...],
     forbidden_dependencies: tuple[tuple[str, str], ...],
 ) -> tuple[Finding, ...]:
     """Build two graphs once, with one bounded witness per cyclic component.
 
     Probable edges matter only when they participate in a violation. Missing
-    targets and dynamic calls independently identify gaps in static coverage.
+    targets independently identify gaps in explicit import resolution.
     """
 
     facts_by_id = {fact.id: fact for fact in facts}
@@ -144,38 +139,4 @@ def build_findings(
             )
         )
 
-    modules_by_path = {module.path: module.id for module in modules}
-    dynamic_facts = {
-        (fact.path, fact.line, fact.column): fact
-        for fact in facts
-        if fact.syntax is ImportSyntax.DYNAMIC_IMPORT
-    }
-    for diagnostic in diagnostics:
-        if diagnostic.code != "dynamic_import_ignored":
-            continue
-        # Recognized call diagnostics always carry their exact AST location.
-        assert diagnostic.path is not None
-        assert diagnostic.line is not None
-        assert diagnostic.column is not None
-        fact = dynamic_facts.get((diagnostic.path, diagnostic.line, diagnostic.column))
-        findings.append(
-            ImportFinding(
-                kind="dynamic_import",
-                source=modules_by_path[diagnostic.path],
-                requested=fact.base_module if fact else None,
-                code=diagnostic.code,
-                message=diagnostic.message,
-                evidence=(
-                    _location(fact, ResolutionKind.DYNAMIC_LITERAL)
-                    if fact
-                    else EvidenceLocation(
-                        diagnostic.path,
-                        diagnostic.line,
-                        diagnostic.column + 1,
-                        diagnostic.source_segment,
-                        None,
-                    ),
-                ),
-            )
-        )
     return tuple(findings)

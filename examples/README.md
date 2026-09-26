@@ -1,7 +1,7 @@
 # Dependency scenarios
 
 The 25 projects under `projects/` are committed source fixtures covering clean
-architecture, cycles, boundary violations, and uncertain imports. The test
+architecture, cycles, boundary violations, and explicit import resolution. The test
 harness reads their source; it never imports or executes the applications.
 
 [manifest.json](manifest.json) defines all 28 runs, including source roots,
@@ -61,17 +61,23 @@ explanation on stderr and no partial JSON report.
 | `src_root_hazard` | Fail from `src`; analysis error from the incorrect repository root. |
 | `missing_internal_target` | Fail: the missing internal module has an explanatory finding. |
 | `valid_namespace_package` | Pass: a valid namespace base is distinct from a missing internal target. |
-| `dynamic_literal` | Fail: both dynamic calls require review and contribute a possible cycle. |
-| `dynamic_aliases` | Fail: common aliases cannot hide any of the three dynamic calls. |
-| `dynamic_nonliteral` | Fail: both runtime-selected targets require review. |
+| `dynamic_literal` | Pass: dynamic calls add no edge or finding; the explicit plugin-to-loader import remains. |
+| `dynamic_aliases` | Pass: aliased dynamic calls add no edge or finding. |
+| `dynamic_nonliteral` | Pass: runtime-selected dynamic targets add no edge or finding. |
 | `scc_not_simple_cycle` | Fail: one three-module component gets one bounded witness. |
 | `dense_cyclic_component` | Fail: many simple cycles get one bounded component witness. |
 | `legitimate_package_reexport` | Pass: public package APIs retain dependencies through initializers. |
 | `location_only_edit` | Fail in both runs: documentation moves evidence lines without changing semantic findings. |
 
-The complete corpus expects **6 passes, 21 finding failures, and 1 analysis
+The complete corpus expects **9 passes, 18 finding failures, and 1 analysis
 error**. Tests additionally check source locations, bounded cycle witnesses,
 normalization, preserved import evidence, and equivalent graphs.
+
+Every explicit import counts, including statements in functions, classes,
+conditional branches, and `TYPE_CHECKING` blocks. Calls to dynamic loaders are
+outside coverage even when their targets are literal strings. These scenarios
+therefore check the graph of explicit imports, not every possible runtime
+dependency.
 
 ## Historical evidence
 
@@ -86,7 +92,9 @@ The simplified tool intentionally changes these expectations:
   are absent from the report and acceptance criteria.
 - Tests are always excluded, so both test-padding runs analyze exactly two
   modules and two dependencies.
-- Possible cycles and all recognized dynamic calls block a pass.
+- Possible cycles expressed through explicit imports block a pass.
+- Dynamic calls contribute no dependencies or findings; their explicit imports
+  still count.
 - A wrong source root is an analysis error, with no partial report.
 - Harmless probable child relationships and valid namespace bases can pass.
 

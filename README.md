@@ -1,7 +1,8 @@
 # pyarchgraph
 
-Check a Python project's internal imports for cycles, forbidden dependencies,
-and unresolved analysis concerns. Project code is parsed, never executed.
+Check a Python project's explicit import statements for cycles, forbidden
+dependencies, and unresolved internal imports. Project code is parsed, never
+executed.
 
 ## Run
 
@@ -41,7 +42,8 @@ uv run pyarchgraph src --exclude 'app/generated/**' --forbid 'app.presentation*:
 
 Directories named `tests`, files named `test_*.py` or `*_test.py`, and the usual
 `.git`, `.venv`, `venv`, `__pycache__`, `build`, and `dist` directories are always
-excluded. Local and typing-only imports always count as structural dependencies.
+excluded. Imports inside functions, classes, conditional branches, and
+`TYPE_CHECKING` blocks always count as structural dependencies.
 
 ## Results
 
@@ -63,8 +65,8 @@ Completed analysis writes one JSON object to stdout. A clean example is:
 | `2` | Invalid configuration or incomplete/invalid source analysis | Explanation on stderr; no JSON |
 
 An empty inventory, ambiguous module names, unreadable or unparseable source,
-unsupported syntax analysis, and incorrect source scope are errors. Partial
-findings cannot turn an analysis error into a completed report.
+and an incorrect source root are errors. Partial findings cannot turn an
+analysis error into a completed report.
 
 The command creates no files. To save a report, redirect stdout:
 
@@ -82,8 +84,6 @@ Every entry in `findings` prevents a pass:
 - `forbidden_dependency`: a definite or possible dependency matching a boundary
   rule, with the matched rules and import evidence.
 - `unresolved_import`: a missing internal target or an escaping relative import.
-- `dynamic_import`: a recognized dynamic call, including literal targets.
-  Static analysis cannot establish its runtime behavior.
 
 Evidence includes the original import text where available, a path relative to
 the command's working directory, one-based line and column numbers, and the
@@ -92,6 +92,11 @@ Repeated imports do not increase the distinct dependency count. Findings and
 source evidence have deterministic ordering.
 
 ## Import analysis
+
+The analyzer parses each discovered Python module and collects every `import`
+and `from ... import ...` statement throughout its syntax tree. Statements count
+whether or not their containing code executes. There is one statement-based
+analysis mode.
 
 Absolute and relative submodule spellings produce the same structural targets.
 For `from package import child`, a source-backed child takes precedence over
@@ -106,15 +111,17 @@ are not missing internal targets. Unknown top-level names are treated as
 external; the tool cannot distinguish every misspelled import from an external
 package without additional knowledge.
 
-The analyzer retains dynamic-loader alias tracking, scope and shadowing
-analysis, branch joins, `TYPE_CHECKING` recognition, and supported modern type
-aliases. Recognized dynamic calls remain findings even when their targets are
-literal or external. Arbitrary runtime aliasing and metaprogramming remain
-outside static analysis; passing is not proof that no dynamic dependencies exist.
+Calls to `importlib.import_module()`, `__import__()`, and aliases of these
+functions produce no dependencies or findings. Surrounding explicit import
+statements still count. Dependencies introduced solely through dynamic imports
+are outside pyarchgraph's coverage; a passing report does not establish their
+absence.
 
-The running interpreter must support the source syntax. Generic function/class
-bounds and defaults still produce `unsupported_annotation_scope`; this release
-preserves existing analysis support rather than expanding it.
+Annotations, generic bounds, type parameter defaults, and type alias expressions
+are not interpreted. For example, `def validate[ModelT: BaseModel](...)` does not
+prevent analysis: the explicit import of `BaseModel` already represents its
+module dependency. The running interpreter must support the source syntax;
+invalid or unsupported Python syntax still prevents analysis.
 
 ## Python API
 
@@ -137,7 +144,7 @@ else:
 The frozen report exposes the same fields as JSON. Invalid option values raise
 `ValueError`; invalid or incomplete analysis raises `AnalysisError`, a
 `ValueError` subclass. There is no score, diagram, baseline, output selection,
-or configurable evidence policy in version 0.5.0.
+or configurable evidence policy in version 0.5.1.
 
 ## Verification
 
@@ -148,7 +155,7 @@ uv run pytest -q
 ```
 
 The [example corpus](examples/README.md) covers 25 projects and 28 runs. The
-manifest explicitly expects six passes, 21 findings reports, and one analysis
+manifest explicitly expects nine passes, 18 findings reports, and one analysis
 error. The evaluator runs the real CLI and fails if any expectation differs.
 Fixture applications are never imported or executed. Historical reviewed
 measurements remain archival; their obsolete scores do not specify current
@@ -156,6 +163,7 @@ behavior.
 
 Checksmith consumes the JSON directly through its normal subprocess adapter.
 Its integration suite also runs all 28 examples through that adapter. Version
-0.5.0 is a breaking interface change: update the Checksmith adapter, package
-pin, and configuration together. The invocation is simply `pyarchgraph .` (or
-`pyarchgraph src`), plus any exclusions and boundary rules.
+0.5.1 limits analysis to explicit import statements and retains JSON schema
+`0.5` and the existing exit codes. Update the pinned pyarchgraph revision in
+Checksmith and consuming configurations together. The invocation is simply
+`pyarchgraph .` (or `pyarchgraph src`), plus any exclusions and boundary rules.

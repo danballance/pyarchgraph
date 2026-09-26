@@ -52,11 +52,10 @@ def test_real_cli_reports_representative_concerns_without_execution_or_artifacts
     assert first.stdout == second.stdout
     document = json.loads(first.stdout)
     assert document["module_count"] == 6
-    assert document["dependency_count"] == 4
+    assert document["dependency_count"] == 3
     assert sorted(f["kind"] for f in document["findings"]) == [
         "cycle",
         "cycle",
-        "dynamic_import",
         "forbidden_dependency",
         "unresolved_import",
     ]
