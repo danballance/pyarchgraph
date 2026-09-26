@@ -8,16 +8,15 @@ otherwise execute any of the discovered source files.
 
 from __future__ import annotations
 
-from collections import defaultdict
-from dataclasses import dataclass
 import keyword
 import os
-from pathlib import Path, PurePosixPath
 import stat
-from typing import Iterable
+from collections import defaultdict
+from collections.abc import Iterable
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 
 from pyarchgraph.model import Diagnostic, Severity, SourceModule
-
 
 DEFAULT_EXCLUDED_DIRECTORY_BASENAMES = frozenset(
     {".git", ".venv", "venv", "__pycache__", "build", "dist"}

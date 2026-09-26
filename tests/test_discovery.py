@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 import os
-from pathlib import Path
 import random
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -351,12 +350,11 @@ def test_non_regular_source_is_diagnosed_and_omitted(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO fixture")
-def test_fifo_cli_exits_promptly_with_incomplete_report(tmp_path: Path) -> None:
+def test_fifo_cli_exits_promptly_without_partial_report(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
     _write_files(source, ["ordinary.py"])
     os.mkfifo(source / "pipe.py")
-    output = tmp_path / "output"
 
     completed = subprocess.run(
         [
@@ -364,9 +362,6 @@ def test_fifo_cli_exits_promptly_with_incomplete_report(tmp_path: Path) -> None:
             "-m",
             "pyarchgraph",
             str(source),
-            "--json-only",
-            "--output-dir",
-            str(output),
         ],
         capture_output=True,
         text=True,
@@ -374,11 +369,9 @@ def test_fifo_cli_exits_promptly_with_incomplete_report(tmp_path: Path) -> None:
         check=False,
     )
 
-    assert completed.returncode == 1
-    document = json.loads((output / "dependency-graph.json").read_text())
-    assert document["analysis"]["complete"] is False
-    assert document["quality"]["score"] is None
-    assert [item["code"] for item in document["diagnostics"]] == ["source_not_regular"]
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    assert "source_not_regular" in completed.stderr
 
 
 def test_regular_file_symlinks_are_retained(tmp_path: Path) -> None:

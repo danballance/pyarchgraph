@@ -1,161 +1,104 @@
-# Architecture review corpus
+# Dependency scenarios
 
-These 25 small projects are committed Python source, designed to make the
-review's claims reproducible. Each directory under `projects/` is an independent
-project. Most contain a readable application scenario; the large pair and test
-padding projects are explicit mathematical controls. No example application is
-imported or executed by the test harness.
+The 25 projects under `projects/` are committed source fixtures covering clean
+architecture, cycles, boundary violations, and uncertain imports. The test
+harness reads their source; it never imports or executes the applications.
 
-The [manifest](manifest.json) declares each project's source root, exclusions,
-expected package names, graph policy, category, intent, historical measurements,
-and desired structural outcomes. Three projects also declare alternative runs:
-production-only test exclusion, an incorrect repository root, and a source edit
-that changes import locations without changing dependencies.
+[manifest.json](manifest.json) defines all 28 runs, including source roots,
+exclusions, forbidden dependencies, expected exit codes, module/dependency
+counts, and findings. Every variant has a complete configuration. The three
+variants exercise explicit test exclusion, an incorrect source root, and a
+documentation edit that moves import locations.
 
-Run the acceptance corpus from the repository root:
+Run the acceptance tests and print the complete expected/actual matrix:
 
 ```sh
 .venv/bin/python -m pytest tests/test_examples.py -q
+.venv/bin/python -m examples.evaluate
 ```
 
-Print the reviewed and current advisory scores beside definite/possible cleanup
-debt, finding counts and the policy result. Add `--json` for category counts,
-cleanup completion, metrics and current provenance, or repeat
-`--project NAME` to select specific projects:
+The evaluator runs the actual CLI for every scenario. It exits successfully
+only when every result matches the manifest: a fixture designed to fail is a
+successful acceptance check when it produces the expected failure. Unexpected
+findings, missing findings, changed certainty/counts, invalid output, and wrong
+exit codes fail validation. Add `--json` for machine-readable results or repeat
+`--project NAME` to select projects:
 
 ```sh
-.venv/bin/python -m examples.evaluate
 .venv/bin/python -m examples.evaluate --project spelling_relative --project spelling_absolute --json
 ```
 
-This report reads the manifest at run time, so it does not store a stale snapshot
-of the evolving implementation. The intentionally bad examples report failures;
-the report command itself succeeds so it can be used to inspect the whole corpus.
-Current cleanup measurements are calculated from the canonical JSON report; the
-immutable historical baseline is read only and has no invented debt measurements.
-
-`policy-debt-v1` counts directed dependencies participating in definite cycles
-and directed dependencies forbidden by configured rules. An edge breaking both
-policies counts twice; overlapping forbidden rules count once. A component
-finding can therefore represent several debt violations. Possible violations
-remain separate, and zero definite debt means cleanup is complete only when the
-policy check passes. Dynamic imports or missing targets can require review even
-with no observed violations.
-
-For an individual project, the command-line interface accepts its explicit
-import root. For example:
+A single scenario can also be checked directly:
 
 ```sh
-.venv/bin/python -m pyarchgraph examples/projects/src_root_hazard/src \
-  --project-root examples/projects/src_root_hazard --expect-package pkg \
-  --json-only --output-dir /tmp/pyarchgraph-example
+.venv/bin/python -m pyarchgraph examples/projects/src_root_hazard/src
+.venv/bin/python -m pyarchgraph examples/projects/dense_ordered_dag --forbid presentation:repository
 ```
 
-The production policy excludes tests by default. The main
-`cycle_with_test_padding` manifest run deliberately sets `include_tests: true`;
-its `production_only` variant excludes `tests/**`. The manifest records these
-choices so that the two scores can be interpreted correctly.
+Reports go to stdout. Exit `0` means no blocking findings; exit `1` means
+findings require attention. Exit `2` is an analysis/configuration error with an
+explanation on stderr and no partial JSON report.
 
-## Projects and the question each answers
+## Expected scenarios
 
-| Project | Category | Intended outcome |
-| --- | --- | --- |
-| `layered_service` | Good | Four legitimate layers are acyclic; an 85 score does not justify a failure. |
-| `ports_and_adapters` | Good | Composition selects infrastructure while the workflow consumes a protocol. |
-| `definite_cycle` | Failure | Two exact imports justify a definite cycle finding. |
-| `self_import` | Failure | A self-import is a one-module cyclic component with a one-edge witness. |
-| `cycle_with_independent_pair` | Control | An unrelated feature raises the score without resolving the cycle. |
-| `cycle_with_49_pairs` | Control | A score above 98 still accompanies the original definite cycle. |
-| `cycle_with_test_padding` | Control | Test consumers dilute the score; explicit production scope preserves the cycle. |
-| `cycle_with_isolated_modules` | Control | Isolated inventory cannot dilute the active-module score. |
-| `dense_ordered_dag` | Warning | More direct imports need a directional rule even when reachability is unchanged. |
-| `spelling_relative` | Warning | Relative child-module imports have the same architecture as their absolute equivalent. |
-| `spelling_absolute` | Warning | The equivalent absolute spelling does not receive an architectural advantage. |
-| `shadowed_package_attribute` | Warning | A shadowed child candidate cannot support a definite cycle failure. |
-| `type_only_cycle` | Warning | Typing dependencies remain structural; an explicit filtered policy can omit them. |
-| `local_import_cycle` | Warning | Function-local imports remain structural; eager runtime behavior is a separate concern. |
-| `mixed_import_evidence` | Failure | Removing typing evidence retains an edge with ordinary evidence. |
-| `src_root_hazard` | Failure | The real cycle is visible from `src`; a wrong root invalidates scope and suppresses the score. |
-| `missing_internal_target` | Failure | Complete parsing does not make a missing internal dependency complete. |
-| `valid_namespace_package` | Warning | An unmodelled namespace base is different from an absent source module. |
-| `dynamic_literal` | Warning | Literal dynamic targets retain uncertainty and explicit call evidence. |
-| `dynamic_aliases` | Warning | Common module and function aliases do not hide dynamic calls. |
-| `dynamic_nonliteral` | Warning | Runtime-selected target names remain visible limitations. |
-| `scc_not_simple_cycle` | Failure | A three-module SCC can contain only two-module simple cycles. |
-| `dense_cyclic_component` | Failure | Many simple cycles require one bounded component witness. |
-| `legitimate_package_reexport` | Good | Public package APIs retain real dependencies through their initializers. |
-| `location_only_edit` | Control | Comments and blank lines change evidence locations, not violation identity. |
+| Project | Expected result |
+| --- | --- |
+| `layered_service` | Pass: four legitimate layers, with no forbidden presentation-to-repository shortcut. |
+| `ports_and_adapters` | Pass: the workflow consumes a protocol; composition selects infrastructure. |
+| `definite_cycle` | Fail: two exact imports form a definite cycle. |
+| `self_import` | Fail: one module imports itself, with a one-edge witness. |
+| `cycle_with_independent_pair` | Fail: an unrelated feature cannot conceal the original cycle. |
+| `cycle_with_49_pairs` | Fail: 49 unrelated dependency pairs cannot conceal the original cycle. |
+| `cycle_with_test_padding` | Fail in both runs: tests are always excluded, leaving two modules and two dependencies. |
+| `cycle_with_isolated_modules` | Fail: isolated modules cannot conceal the original cycle. |
+| `dense_ordered_dag` | Fail: an acyclic graph violates the configured presentation-to-repository rule. |
+| `spelling_relative` | Pass: relative child imports have the same architecture as the absolute spelling. |
+| `spelling_absolute` | Pass: absolute spelling produces the same dependency count. |
+| `shadowed_package_attribute` | Fail: a possible cycle remains visible without claiming it is definite. |
+| `type_only_cycle` | Fail: typing-only imports remain structural dependencies. |
+| `local_import_cycle` | Fail: function-local imports remain structural dependencies. |
+| `mixed_import_evidence` | Fail: duplicate ordinary and typing-only imports retain evidence without double-counting an edge. |
+| `src_root_hazard` | Fail from `src`; analysis error from the incorrect repository root. |
+| `missing_internal_target` | Fail: the missing internal module has an explanatory finding. |
+| `valid_namespace_package` | Pass: a valid namespace base is distinct from a missing internal target. |
+| `dynamic_literal` | Fail: both dynamic calls require review and contribute a possible cycle. |
+| `dynamic_aliases` | Fail: common aliases cannot hide any of the three dynamic calls. |
+| `dynamic_nonliteral` | Fail: both runtime-selected targets require review. |
+| `scc_not_simple_cycle` | Fail: one three-module component gets one bounded witness. |
+| `dense_cyclic_component` | Fail: many simple cycles get one bounded component witness. |
+| `legitimate_package_reexport` | Pass: public package APIs retain dependencies through initializers. |
+| `location_only_edit` | Fail in both runs: documentation moves evidence lines without changing semantic findings. |
 
-The categories describe the lesson a project illustrates. A warning example
-may contain a cycle under the full structural policy, and a good example need
-not score above an arbitrary numerical threshold. The `desired` objects make
-the intended outcomes explicit instead of inferring them from those labels.
+The complete corpus expects **6 passes, 21 finding failures, and 1 analysis
+error**. Tests additionally check source locations, bounded cycle witnesses,
+normalization, preserved import evidence, and equivalent graphs.
 
-## Before-change evidence
+## Historical evidence
 
-[review-baseline.json](review-baseline.json) was captured using an untouched
-copy of commit `925276dbedbc324427a619aab91a35a719e8e183`, before changing the
-implementation. It records the analyser version, commit and Python-file hashes,
-interpreter version, formula and graph policy, per-run roots and exclusions,
-module/edge/cycle/reachability metrics, unresolved imports, dynamic warnings,
-and SHA-256 hashes of every fixture source file. All 28 baseline runs parsed
-successfully.
+[review-baseline.json](review-baseline.json) is the immutable snapshot from
+commit `925276dbedbc324427a619aab91a35a719e8e183`. Its old scores and policy
+measurements are archival evidence, not acceptance requirements. The acceptance
+tests verify that the committed fixture source hashes still match that snapshot.
 
-The baseline is historical evidence, not a specification to preserve its bugs.
-In particular:
+The simplified tool intentionally changes these expectations:
 
-| Historical observation | Reviewed result | Desired current behavior |
-| --- | --- | --- |
-| Relative versus absolute spelling | 33.3333 versus 85; two versus zero cyclic modules | Same architecture and score; original syntax evidence retained. |
-| Shadowed package attribute | A candidate relationship contributes to a cycle | Possible cycle is separate from a definite blocking finding. |
-| Incorrect source root | 100 with `complete=true` | Invalid scope, no score, and an explicit root/package warning. |
-| Aliased dynamic calls | Zero warnings | Recognized aliases and literal target evidence; nonliteral calls remain unresolved warnings. |
-| Comment/whitespace-only edit | Import fact identities change | Semantic dependency and finding identities stay stable. |
-
-The scoring controls intentionally keep the existing formula's limitations
-visible. These are arithmetic consequences, rather than resolution bugs:
-
-| Unchanged graph formula | Score |
-| --- | ---: |
-| Two-module cycle | 0 |
-| Same cycle plus one unrelated directed pair | 57.5 |
-| Same cycle plus 49 unrelated directed pairs | 98.4455 |
-| Same cycle plus 100 test consumers | 98.0392 |
-| Four-module chain | 85 |
-| Fully ordered four-module DAG | 85 |
-
-The tests separately assert the stable formula controls and the corrected
-behavior. A high score never clears a definite cycle; a directional rule can
-reject a new direct edge even when the score does not change. These checks
-require no numerical threshold and contain no expected-failure markers.
-
-The cleanup model provides an additional control: the two-module cycle and all
-of its padding variants retain exactly two definite cyclic-dependency violations.
-Adding independent pairs, test consumers or isolated modules cannot reduce that
-count. The forbidden shortcuts in `dense_ordered_dag` contribute separate debt
-even though they do not change reachability. The original score measurements
-remain useful evidence of the advisory formula's limitations.
-
-For edit-by-edit cleanup, use fresh reports generated by the same analyzer with
-`--output json --cleanup-baseline PATH`; retain identical scope and policy
-settings. Review the individual transitions as well as the count delta. A lower
-total can hide a newly introduced violation unless `has_new_violations` is also
-checked; uncertainty or module deletion is not a verified repair. See the
-[agent workflow](../README.md#cleanup-comparisons) for commands and compatibility
-requirements. The historical review snapshot is not a compatible cleanup
-baseline.
+- Numerical scores, cleanup debt, baseline comparisons, and evidence filters
+  are absent from the report and acceptance criteria.
+- Tests are always excluded, so both test-padding runs analyze exactly two
+  modules and two dependencies.
+- Possible cycles and all recognized dynamic calls block a pass.
+- A wrong source root is an analysis error, with no partial report.
+- Harmless probable child relationships and valid namespace bases can pass.
 
 ## Extending the corpus
 
-Add readable source under a new `projects/<name>/` directory, explain its intent
-in a local README, and register the source root and desired result in the
-manifest. Keep production and test scope explicit. Use named variants when the
-source or scope is deliberately comparable. The harness passes those declared
-settings to the public analysis API and checks source locations on cycle
-witnesses without importing the fixture code.
+Add readable source and a local explanation under `projects/<name>/`, then
+register a complete default run and any variants in the manifest. Define the
+expected behavior from the scenario before running the implementation. Keep
+structural assertions when counts alone would miss the intended relationship.
+Do not rewrite expectations to accommodate a regression, or modify sample
+applications simply to make acceptance checks pass.
 
-The committed historical snapshot is tied to these exact sources. If fixtures
-change, preserve the original evidence in version history and deliberately
-capture a new baseline with recorded analyser identity; do not rewrite old
-observations using the fixed implementation. A formula version alone cannot
-identify changes to resolution or evidence filtering.
+Preserve the historical snapshot. Any deliberate fixture update also needs a
+reviewed update to the source-integrity check; do not replace old observations
+with measurements from the new implementation.

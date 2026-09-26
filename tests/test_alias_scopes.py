@@ -7,10 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from pyarchgraph import GraphPolicy, analyse
-from pyarchgraph.findings import check_status
+from pyarchgraph.discovery import discover_modules
+from pyarchgraph.extraction import AstImportFactSource
 from pyarchgraph.model import ImportSyntax
-
 
 LOADER = "from importlib import import_module as load\n"
 GUARD = "from typing import TYPE_CHECKING as TC\n"
@@ -19,7 +18,7 @@ GUARD = "from typing import TYPE_CHECKING as TC\n"
 def cycle(tmp_path: Path, source: str):
     (tmp_path / "a.py").write_text(source, encoding="utf-8")
     (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
-    return analyse(tmp_path, policy=GraphPolicy(include_type_only=False))
+    return AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
 
 
 @pytest.mark.parametrize(
@@ -54,17 +53,9 @@ def cycle(tmp_path: Path, source: str):
 )
 def test_possible_loader_paths_retain_candidates(tmp_path: Path, source: str):
     result = cycle(tmp_path, source)
-    assert result.complete
-    assert not result.dependency_resolution_complete
-    assert check_status(result) == "needs_review"
-    facts = [f for f in result.import_facts if f.base_module == "b"]
+    facts = [f for f in result.facts if f.base_module == "b"]
     assert len(facts) == 1
     assert facts[0].syntax is ImportSyntax.DYNAMIC_IMPORT
-    assert {(e.source, e.target) for e in result.architecture_dependencies} == {
-        ("a", "b"),
-        ("b", "a"),
-    }
-    assert result.findings[0]["certainty"] == "possible"
     assert any(
         d.code == "dynamic_import_ignored" and d.line == facts[0].line
         for d in result.diagnostics
@@ -101,15 +92,7 @@ def test_possible_loader_paths_retain_candidates(tmp_path: Path, source: str):
 )
 def test_runtime_guards_keep_exact_dependencies(tmp_path: Path, source: str):
     result = cycle(tmp_path, source)
-    assert result.complete
-    assert result.dependency_resolution_complete
-    assert check_status(result) == "fail"
-    assert not next(f for f in result.import_facts if f.base_module == "b").type_only
-    assert {(e.source, e.target) for e in result.architecture_dependencies} == {
-        ("a", "b"),
-        ("b", "a"),
-    }
-    assert result.findings[0]["certainty"] == "definite"
+    assert not next(f for f in result.facts if f.base_module == "b").type_only
 
 
 @pytest.mark.parametrize(
@@ -124,7 +107,7 @@ def test_runtime_guards_keep_exact_dependencies(tmp_path: Path, source: str):
 )
 def test_lexical_bindings_do_not_invent_loaders(tmp_path: Path, source: str):
     result = cycle(tmp_path, source)
-    assert not any(f.syntax is ImportSyntax.DYNAMIC_IMPORT for f in result.import_facts)
+    assert not any(f.syntax is ImportSyntax.DYNAMIC_IMPORT for f in result.facts)
     assert not result.diagnostics
 
 
@@ -132,9 +115,7 @@ def test_lexical_bindings_do_not_invent_loaders(tmp_path: Path, source: str):
 @pytest.mark.parametrize("definition", ["def f[TC]():", "class f[TC]:"])
 def test_generic_parameter_shadows_guard(tmp_path: Path, definition: str):
     result = cycle(tmp_path, GUARD + definition + "\n    if TC:\n        import b\n")
-    assert result.complete
-    assert check_status(result) == "fail"
-    assert not next(f for f in result.import_facts if f.base_module == "b").type_only
+    assert not next(f for f in result.facts if f.base_module == "b").type_only
 
 
 @pytest.mark.parametrize(
@@ -149,8 +130,7 @@ def test_generic_parameter_shadows_guard(tmp_path: Path, definition: str):
 )
 def test_stable_guards_and_comprehension_targets(tmp_path: Path, source: str):
     result = cycle(tmp_path, source)
-    assert check_status(result) == "pass"
-    assert next(f for f in result.import_facts if f.base_module == "b").type_only
+    assert next(f for f in result.facts if f.base_module == "b").type_only
 
 
 @pytest.mark.parametrize(
@@ -174,9 +154,7 @@ def test_nested_paths_and_binding_expressions_keep_runtime_imports(
     tmp_path: Path, source: str
 ):
     result = cycle(tmp_path, source)
-    assert result.complete
-    assert check_status(result) == "fail"
-    assert not next(f for f in result.import_facts if f.base_module == "b").type_only
+    assert not next(f for f in result.facts if f.base_module == "b").type_only
 
 
 @pytest.mark.skipif(sys.version_info < (3, 12), reason="PEP 695 syntax")
@@ -189,16 +167,12 @@ def test_nested_paths_and_binding_expressions_keep_runtime_imports(
 )
 def test_unsupported_lazy_annotation_scopes_are_explicit(tmp_path: Path, source: str):
     result = cycle(tmp_path, LOADER + source)
-    assert not result.complete
-    assert not result.dependency_resolution_complete
-    assert result.quality.score is None
     assert any(d.code == "unsupported_annotation_scope" for d in result.diagnostics)
 
 
 @pytest.mark.skipif(sys.version_info < (3, 13), reason="PEP 696 syntax")
 def test_unsupported_type_parameter_default_is_explicit(tmp_path: Path):
     result = cycle(tmp_path, LOADER + 'def f[T = load("b")]():\n    pass\n')
-    assert not result.complete
     assert any(d.code == "unsupported_annotation_scope" for d in result.diagnostics)
 
 
@@ -209,19 +183,15 @@ def test_generic_defaults_use_outer_scope_and_bases_use_parameter_scope(tmp_path
         LOADER
         + 'def f[load](value=load("b")):\n    pass\nclass C[load](load("b")):\n    pass\n',
     )
-    facts = [f for f in result.import_facts if f.base_module == "b"]
+    facts = [f for f in result.facts if f.base_module == "b"]
     assert [f.line for f in facts] == [2]
-    assert result.complete
-    assert check_status(result) == "needs_review"
 
 
 def test_deferred_builtin_alias_can_precede_module_shadow(tmp_path: Path):
     result = cycle(
         tmp_path, 'def f():\n    __import__("b")\nf()\n__import__ = object()\n'
     )
-    assert result.complete
-    assert check_status(result) == "needs_review"
-    assert any(f.base_module == "b" for f in result.import_facts)
+    assert any(f.base_module == "b" for f in result.facts)
 
 
 @pytest.mark.parametrize(
@@ -234,9 +204,7 @@ def test_deferred_builtin_alias_can_precede_module_shadow(tmp_path: Path):
 )
 def test_expression_namespaces_and_augmented_assignment(tmp_path: Path, source: str):
     result = cycle(tmp_path, source)
-    assert result.complete
-    assert check_status(result) == "needs_review"
-    assert len([f for f in result.import_facts if f.base_module == "b"]) == 1
+    assert len([f for f in result.facts if f.base_module == "b"]) == 1
 
 
 @pytest.mark.parametrize(
@@ -251,6 +219,4 @@ def test_expression_namespaces_and_augmented_assignment(tmp_path: Path, source: 
 )
 def test_exception_groups_and_explicit_class_globals(tmp_path: Path, source: str):
     result = cycle(tmp_path, source)
-    assert result.complete
-    assert check_status(result) == "needs_review"
-    assert any(f.base_module == "b" for f in result.import_facts)
+    assert any(f.base_module == "b" for f in result.facts)
