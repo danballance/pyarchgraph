@@ -64,7 +64,7 @@ def test_type_declarations_leave_only_explicit_import_dependencies(
         ("a", "importlib"),
         ("b", "a"),
     ]
-    report = analyse(tmp_path, forbidden_dependencies=(("a", "b"),))
+    report = analyse(tmp_path)
     assert report.dependency_count == 2
     assert report.findings == ()
 

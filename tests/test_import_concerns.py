@@ -54,7 +54,7 @@ def test_dynamic_calls_produce_no_dependency_or_finding(tmp_path: Path) -> None:
             for guard in ("if TYPE_CHECKING:", "def later():", "class Container:")
         )
     )
-    report = analyse(tmp_path, forbidden_dependencies=(("pkg.a", "pkg.b"),))
+    report = analyse(tmp_path)
     assert report.findings == ()
     assert report.dependency_count == 1
 

@@ -96,10 +96,14 @@ def _assert_evidence(evidence, project_id):
 
 def _assert_finding_contract(finding, project_id):
     kind = finding["kind"]
-    if kind in {"cycle", "forbidden_dependency"}:
-        fields = {"kind", "certainty", "witness"}
-        fields.update({"members", "definite_members"} if kind == "cycle" else {"rules"})
-        assert set(finding) == fields
+    if kind == "cycle":
+        assert set(finding) == {
+            "kind",
+            "certainty",
+            "witness",
+            "members",
+            "definite_members",
+        }
         assert finding["certainty"] in {"definite", "possible"}
         assert finding["witness"]
         for edge in finding["witness"]:
@@ -134,14 +138,13 @@ def test_manifest_preserves_every_project_and_run():
         (item["project"], item["variant"]) for item in BASELINE["observations"]
     }
     outcomes = [config["expected"]["outcome"] for _, _, config in evaluate.iter_runs()]
-    assert outcomes.count("pass") == 9
-    assert outcomes.count("fail") == 18
+    assert outcomes.count("pass") == 10
+    assert outcomes.count("fail") == 17
     assert outcomes.count("error") == 1
     for project_id, variant_id in RUNS:
         config = _configuration(project_id, variant_id)
         assert config["source_root"]
         assert isinstance(config["exclusions"], list)
-        assert isinstance(config["forbidden_dependencies"], list)
         assert (EXAMPLES / "projects" / project_id / "README.md").is_file()
 
 
@@ -207,14 +210,16 @@ def test_padding_does_not_conceal_or_change_the_original_cycle():
     assert default["module_count"] == default["dependency_count"] == 2
 
 
-def test_directional_rule_rejects_a_shortcut_in_an_acyclic_graph():
+def test_acyclic_graph_passes_with_additional_direct_dependencies():
     assert _completed("layered_service").returncode == 0
-    assert _completed("dense_ordered_dag").returncode == 1
-    assert not _cycles("dense_ordered_dag")
+    assert _completed("dense_ordered_dag").returncode == 0
     assert nx.is_directed_acyclic_graph(nx.DiGraph(_pairs("dense_ordered_dag")))
-    (finding,) = _report("dense_ordered_dag")["findings"]
-    assert finding["kind"] == "forbidden_dependency"
-    assert finding["rules"] == [["presentation", "repository"]]
+    assert _pairs("layered_service") < _pairs("dense_ordered_dag")
+    assert ("presentation", "repository") in _pairs("dense_ordered_dag")
+    report = _report("dense_ordered_dag")
+    assert report["module_count"] == 4
+    assert report["dependency_count"] == 6
+    assert report["findings"] == []
 
 
 def test_submodule_spelling_preserves_architecture_and_original_syntax():

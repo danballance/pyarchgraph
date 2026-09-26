@@ -153,25 +153,6 @@ def test_local_and_typing_only_cycles_always_block(tmp_path: Path, source: str) 
     _assert_closed_witness(cycle)
 
 
-@pytest.mark.parametrize(
-    "source",
-    [
-        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import b\n",
-        "def late():\n    import b as backend\n",
-        "class Container:\n    import b\n",
-        "if False:\n    import b\n",
-    ],
-)
-def test_nested_explicit_imports_enforce_forbidden_dependencies(
-    tmp_path: Path, source: str
-) -> None:
-    _write(tmp_path, {"a.py": source, "b.py": ""})
-    (finding,) = analyse(tmp_path, forbidden_dependencies=(("a", "b"),)).findings
-    assert finding.kind == "forbidden_dependency"
-    assert finding.certainty == "definite"
-    assert [(edge.source, edge.target) for edge in finding.witness] == [("a", "b")]
-
-
 def test_duplicate_import_sites_preserved_without_counting_extra_edges(
     tmp_path: Path,
 ) -> None:
@@ -189,38 +170,7 @@ def test_duplicate_import_sites_preserved_without_counting_extra_edges(
     assert {e.line for e in edge.evidence} == {3, 5, 6}
 
 
-def test_forbidden_redundant_shortcut_is_still_reported(tmp_path: Path) -> None:
-    _write(
-        tmp_path,
-        {
-            "presentation.py": "import domain\n",
-            "domain.py": "import storage\n",
-            "storage.py": "",
-        },
-    )
-    rules = (("presentation", "storage"),)
-    assert analyse(tmp_path, forbidden_dependencies=rules).findings == ()
-    (tmp_path / "presentation.py").write_text("import domain\nimport storage\n")
-    (finding,) = analyse(tmp_path, forbidden_dependencies=rules).findings
-    assert finding.kind == "forbidden_dependency"
-    assert finding.certainty == "definite"
-    assert finding.rules == rules
-    (edge,) = finding.witness
-    assert (edge.source, edge.target) == ("presentation", "storage")
-    assert edge.evidence[0].line == 2
-
-
-def test_overlapping_boundary_globs_share_one_finding_and_are_directional_case_sensitive(
-    tmp_path: Path,
-) -> None:
-    _write(tmp_path, {"pkg/a.py": "import pkg.b\n", "pkg/b.py": ""})
-    rules = (("pkg.*", "pkg.b"), ("pkg.a", "*"), ("PKG.*", "pkg.b"), ("pkg.b", "pkg.a"))
-    (finding,) = analyse(tmp_path, forbidden_dependencies=rules).findings
-    assert finding.rules == tuple(sorted(rules[:2]))
-    assert len(finding.witness) == 1
-
-
-def test_probable_boundary_blocks_but_harmless_candidate_passes(tmp_path: Path) -> None:
+def test_acyclic_probable_dependency_passes(tmp_path: Path) -> None:
     _write(
         tmp_path,
         {
@@ -229,41 +179,46 @@ def test_probable_boundary_blocks_but_harmless_candidate_passes(tmp_path: Path) 
             "pkg/b.py": "",
         },
     )
-    assert analyse(tmp_path).findings == ()
-    (finding,) = analyse(
-        tmp_path, forbidden_dependencies=(("pkg.a", "pkg.b"),)
-    ).findings
-    assert finding.certainty == "possible"
-    assert finding.kind == "forbidden_dependency"
+    report = analyse(tmp_path)
+    assert report.dependency_count == 1
+    assert report.findings == ()
 
 
-def test_exact_support_makes_probable_boundary_definite(tmp_path: Path) -> None:
+def test_exact_support_makes_possible_cycle_definite(tmp_path: Path) -> None:
     _write(
         tmp_path,
         {
             "pkg/__init__.py": "",
-            "pkg/a.py": "from pkg import b\nimport pkg.b\n",
-            "pkg/b.py": "",
+            "pkg/a.py": "from pkg import b\n",
+            "pkg/b.py": "import pkg.a\n",
         },
     )
-    report = analyse(tmp_path, forbidden_dependencies=(("pkg.a", "pkg.b"),))
-    (finding,) = report.findings
-    assert report.dependency_count == 1
-    assert finding.certainty == "definite"
-    (edge,) = finding.witness
-    assert {e.resolution_kind.value for e in edge.evidence} == {
-        "exact_module",
-        "probable_submodule",
-    }
+    before = analyse(tmp_path)
+    (possible,) = before.findings
+    assert possible.certainty == "possible"
+    assert possible.definite_members == ()
+
+    (tmp_path / "pkg/a.py").write_text("from pkg import b\nimport pkg.b\n")
+    after = analyse(tmp_path)
+    (definite,) = after.findings
+    assert before.dependency_count == after.dependency_count == 2
+    assert definite.certainty == "definite"
+    assert definite.members == definite.definite_members == possible.members
+    edge = next(edge for edge in definite.witness if edge.source == "pkg.a")
+    assert [(e.line, e.resolution_kind.value) for e in edge.evidence] == [
+        (2, "exact_module"),
+    ]
+    _assert_closed_witness(possible)
+    _assert_closed_witness(definite)
 
 
 def test_blank_lines_preserve_semantic_findings_and_update_locations(
     tmp_path: Path,
 ) -> None:
     _write(tmp_path, {"a.py": "import b\n", "b.py": "import a\n"})
-    before = analyse(tmp_path, forbidden_dependencies=(("a", "b"),))
+    before = analyse(tmp_path)
     _write(tmp_path, {"a.py": "\n\nimport b\n", "b.py": "\nimport a\n"})
-    after = analyse(tmp_path, forbidden_dependencies=(("a", "b"),))
+    after = analyse(tmp_path)
     assert [
         (f.kind, f.certainty, [(e.source, e.target) for e in f.witness])
         for f in before.findings

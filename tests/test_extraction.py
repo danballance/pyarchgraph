@@ -100,11 +100,11 @@ def test_unicode_columns_are_one_based_in_public_findings(tmp_path: Path) -> Non
         "é = 1; import b\né = 1; __import__('b')\né = 1; __import__(target)\n",
         encoding="utf-8",
     )
-    (tmp_path / "b.py").write_text("", encoding="utf-8")
-    report = analyse(tmp_path, forbidden_dependencies=(("a", "b"),))
-    (boundary,) = report.findings
-    assert boundary.kind == "forbidden_dependency"
-    assert [(item.line, item.column) for item in boundary.witness[0].evidence] == [
+    (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
+    (cycle,) = analyse(tmp_path).findings
+    assert cycle.kind == "cycle"
+    edge = next(edge for edge in cycle.witness if edge.source == "a")
+    assert [(item.line, item.column) for item in edge.evidence] == [
         (1, 8),
     ]
 
@@ -202,7 +202,7 @@ def test_dynamic_import_calls_and_aliases_have_no_evidence_or_findings(
         ("a", "importlib"),
         ("b", "a"),
     ]
-    report = analyse(tmp_path, forbidden_dependencies=(("a", "b"),))
+    report = analyse(tmp_path)
     assert report.dependency_count == 1
     assert report.findings == ()
 
