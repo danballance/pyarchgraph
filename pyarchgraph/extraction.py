@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import replace
 import hashlib
 import json
-from pathlib import Path
-import tokenize
 import stat
-from typing import Iterable
+import tokenize
+from collections.abc import Iterable
+from dataclasses import replace
+from itertools import pairwise
+from pathlib import Path
 
 from pyarchgraph.model import (
     Diagnostic,
@@ -20,7 +21,6 @@ from pyarchgraph.model import (
     Severity,
     SourceModule,
 )
-
 
 _FACT_ID_PREFIX_LENGTH = 12
 
@@ -100,7 +100,7 @@ def _minimum_unique_prefix_lengths(digests: tuple[str, ...]) -> tuple[int, ...]:
 
     ordered = sorted(set(digests))
     lengths = dict.fromkeys(ordered, _FACT_ID_PREFIX_LENGTH)
-    for left, right in zip(ordered, ordered[1:]):
+    for left, right in pairwise(ordered):
         common = 0
         for left_char, right_char in zip(left, right):
             if left_char != right_char:
@@ -147,6 +147,12 @@ def _syntax_error_column(error: SyntaxError) -> int | None:
     if error.offset is None:
         return None
     return max(error.offset - 1, 0)
+
+
+def _character_column(lines: list[str], line: int, byte_column: int) -> int:
+    """Convert an AST UTF-8 byte offset to a zero-based character column."""
+
+    return len(lines[line - 1].encode("utf-8")[:byte_column].decode("utf-8"))
 
 
 # Unknown is an explicit alternative: unions retain possible loaders, while only
@@ -293,13 +299,13 @@ class _LocalBindings(ast.NodeVisitor):
                 self.deleted_names.add(name)
         super().generic_visit(node)
 
-    def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+    def visit_Import(self, node: ast.Import) -> None:
         for name, alias in zip(_bound_names(node), node.names):
             self._record(name, _import_alias(node, alias))
 
     visit_ImportFrom = visit_Import
 
-    def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+    def visit_Assign(self, node: ast.Assign) -> None:
         self.visit(node.value)
         for target in node.targets:
             if isinstance(target, ast.Name):
@@ -307,7 +313,7 @@ class _LocalBindings(ast.NodeVisitor):
             else:
                 self.visit(target)
 
-    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         if node.value is not None:
             self.visit(node.value)
         if isinstance(node.target, ast.Name):
@@ -315,18 +321,18 @@ class _LocalBindings(ast.NodeVisitor):
         else:
             self.visit(node.target)
 
-    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
         self.visit(node.value)
         self._record(node.target.id, node.value)
 
-    def visit_TypeAlias(self, node: ast.AST) -> None:  # noqa: N802
+    def visit_TypeAlias(self, node: ast.AST) -> None:
         # Only the alias object binds here. Its parameters and expression
         # scopes must not become locals of the containing function or module.
         for name in _bound_names(node):
             self._record(name)
         self.definitions.append(node)
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.definitions.append(node)
         self._record(node.name)
         for expression in _definition_expressions(node):
@@ -343,15 +349,15 @@ class _LocalBindings(ast.NodeVisitor):
     visit_AsyncFunctionDef = visit_FunctionDef
     visit_ClassDef = visit_FunctionDef
 
-    def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
+    def visit_Lambda(self, node: ast.Lambda) -> None:
         self.definitions.append(node)
         for expression in _definition_expressions(node):
             self.visit(expression)
 
-    def visit_Global(self, node: ast.Global) -> None:  # noqa: N802
+    def visit_Global(self, node: ast.Global) -> None:
         self.globals.update(node.names)
 
-    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:  # noqa: N802
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
         self.nonlocals.update(node.names)
 
     def _visit_comprehension(
@@ -420,7 +426,9 @@ class _ScopeIndex:
                 inherited = (
                     initial.copy()
                     if node is tree
-                    else self.outer(node, annotation_scope=isinstance(node, _TYPE_ALIAS))
+                    else self.outer(
+                        node, annotation_scope=isinstance(node, _TYPE_ALIAS)
+                    )
                 )
                 for name in bindings.globals:
                     inherited[name] = self.summaries.get(tree, {}).get(name, _UNKNOWN)
@@ -502,7 +510,7 @@ class _ScopeIndex:
             # including attributes bound after the alias statement.
             return self.summaries.get(parent, {}).copy()
         parameters: set[str] = set()
-        while isinstance(parent, ast.ClassDef) or isinstance(parent, _TYPE_ALIAS):
+        while isinstance(parent, (ast.ClassDef, _TYPE_ALIAS)):
             # Ordinary scopes nested inside an alias capture its parameters,
             # but must not inherit class attributes through its summary.
             for parameter in getattr(parent, "type_params", ()):
@@ -581,7 +589,7 @@ class _ImportVisitor(ast.NodeVisitor):
             type_only=self._type_only,
         )
 
-    def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+    def visit_Import(self, node: ast.Import) -> None:
         for alias_index, alias in enumerate(node.names):
             bound_name = alias.asname or alias.name.partition(".")[0]
             self.facts.append(
@@ -599,7 +607,7 @@ class _ImportVisitor(ast.NodeVisitor):
 
             self._aliases[bound_name] = frozenset({_import_alias(node, alias)})
 
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         for alias_index, alias in enumerate(node.names):
             bound_name = alias.asname or alias.name
             self.facts.append(
@@ -617,7 +625,7 @@ class _ImportVisitor(ast.NodeVisitor):
 
             self._aliases[bound_name] = frozenset({_import_alias(node, alias)})
 
-    def visit_Module(self, node: ast.Module) -> None:  # noqa: N802
+    def visit_Module(self, node: ast.Module) -> None:
         self._index = _ScopeIndex(node, self._aliases)
         self._global_aliases = self._index.summaries[node]
         self._mutations = self._index.mutations[node]
@@ -630,7 +638,7 @@ class _ImportVisitor(ast.NodeVisitor):
             self.visit(statement)
         return self._aliases
 
-    def visit_If(self, node: ast.If) -> None:  # noqa: N802
+    def visit_If(self, node: ast.If) -> None:
         self.visit(node.test)
         guard = self._is_type_checking_guard(node.test)
         incoming = self._aliases.copy()
@@ -641,14 +649,14 @@ class _ImportVisitor(ast.NodeVisitor):
         alternative = self._path(node.orelse, incoming)
         self._aliases = _merge_aliases(body, alternative)
 
-    def visit_IfExp(self, node: ast.IfExp) -> None:  # noqa: N802
+    def visit_IfExp(self, node: ast.IfExp) -> None:
         self.visit(node.test)
         incoming = self._aliases.copy()
         body = self._path([node.body], incoming)
         alternative = self._path([node.orelse], incoming)
         self._aliases = _merge_aliases(body, alternative)
 
-    def visit_BoolOp(self, node: ast.BoolOp) -> None:  # noqa: N802
+    def visit_BoolOp(self, node: ast.BoolOp) -> None:
         exits = []
         for value in node.values:
             self.visit(value)
@@ -658,7 +666,7 @@ class _ImportVisitor(ast.NodeVisitor):
     def _is_type_checking_guard(self, test: ast.expr) -> bool:
         return self._known_alias(test) == frozenset({"type_checking"})
 
-    def visit_Try(self, node: ast.Try) -> None:  # noqa: N802
+    def visit_Try(self, node: ast.Try) -> None:
         incoming = self._aliases.copy()
         # An exception can leave any prefix of the try suite applied.
         prefixes = [incoming]
@@ -681,7 +689,7 @@ class _ImportVisitor(ast.NodeVisitor):
 
     visit_TryStar = visit_Try
 
-    def visit_Match(self, node: ast.Match) -> None:  # noqa: N802
+    def visit_Match(self, node: ast.Match) -> None:
         self.visit(node.subject)
         incoming = self._aliases.copy()
         exits = [incoming]  # Include no match; exhaustiveness is not inferred.
@@ -722,7 +730,7 @@ class _ImportVisitor(ast.NodeVisitor):
                     )
                 )
 
-    def visit_TypeAlias(self, node: ast.AST) -> None:  # noqa: N802
+    def visit_TypeAlias(self, node: ast.AST) -> None:
         for name in _bound_names(node):
             self._aliases.pop(name, None)
         inherited_aliases = self._aliases
@@ -770,7 +778,7 @@ class _ImportVisitor(ast.NodeVisitor):
             self._mutations = inherited_mutations
             self._comprehension_writes = inherited_comprehension
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._visit_local_namespace(node)
 
     visit_AsyncFunctionDef = visit_FunctionDef
@@ -880,7 +888,7 @@ class _ImportVisitor(ast.NodeVisitor):
             for name in _bound_names(node):
                 self._aliases.pop(name, None)
 
-    def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+    def visit_Assign(self, node: ast.Assign) -> None:
         self.visit(node.value)
         alias = self._known_alias(node.value)
         for target in node.targets:
@@ -888,7 +896,7 @@ class _ImportVisitor(ast.NodeVisitor):
             if isinstance(target, ast.Name):
                 self._aliases[target.id] = alias
 
-    def visit_AugAssign(self, node: ast.AugAssign) -> None:  # noqa: N802
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
         # Read the old target before writing it; a loader can occur on the RHS.
         if not isinstance(node.target, ast.Name):
             self.visit(node.target)
@@ -896,7 +904,7 @@ class _ImportVisitor(ast.NodeVisitor):
         if isinstance(node.target, ast.Name):
             self._aliases.pop(node.target.id, None)
 
-    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         self.visit(node.annotation)
         if node.value is not None:
             self.visit(node.value)
@@ -905,7 +913,7 @@ class _ImportVisitor(ast.NodeVisitor):
             if isinstance(node.target, ast.Name):
                 self._aliases[node.target.id] = alias
 
-    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
         self.visit(node.value)
         alias = self._known_alias(node.value)
         self.visit(node.target)
@@ -942,7 +950,7 @@ class _ImportVisitor(ast.NodeVisitor):
     visit_AsyncFor = _visit_loop
     visit_While = _visit_loop
 
-    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:  # noqa: N802
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         if node.type is not None:
             self.visit(node.type)
         for name in _bound_names(node):
@@ -1060,7 +1068,7 @@ class _ImportVisitor(ast.NodeVisitor):
             )
         return _alias_values(expression, self._aliases)
 
-    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+    def visit_Call(self, node: ast.Call) -> None:
         callees = self._known_alias(node.func) & {"__import__", "import_module"}
         if callees:
             # Prefer import_module for the literal candidate if both loaders
@@ -1102,6 +1110,7 @@ class _ImportVisitor(ast.NodeVisitor):
                     path=self._module.path,
                     line=node.lineno,
                     column=node.col_offset,
+                    source_segment=ast.get_source_segment(self._source, node),
                 )
             )
 
@@ -1202,8 +1211,33 @@ class AstImportFactSource:
                 # successful extraction. Continue collecting other modules.
                 continue
 
-            facts.extend(visitor.facts)
-            diagnostics.extend(visitor.diagnostics)
+            # AST positions count UTF-8 bytes, unlike SyntaxError offsets and
+            # the character columns exposed in findings. Convert both facts and
+            # visitor diagnostics together so dynamic-call locations still match.
+            lines = source.split("\n")
+            facts.extend(
+                replace(
+                    fact,
+                    column=_character_column(lines, fact.line, fact.column),
+                    end_column=(
+                        _character_column(lines, fact.end_line, fact.end_column)
+                        if fact.end_line is not None and fact.end_column is not None
+                        else fact.end_column
+                    ),
+                )
+                for fact in visitor.facts
+            )
+            diagnostics.extend(
+                replace(
+                    diagnostic,
+                    column=(
+                        _character_column(lines, diagnostic.line, diagnostic.column)
+                        if diagnostic.line is not None and diagnostic.column is not None
+                        else diagnostic.column
+                    ),
+                )
+                for diagnostic in visitor.diagnostics
+            )
 
         return FactCollection(
             facts=tuple(facts),

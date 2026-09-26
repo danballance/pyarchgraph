@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 
-from pyarchgraph import GraphPolicy, analyse
-from pyarchgraph.findings import check_status
+from pyarchgraph.discovery import discover_modules
+from pyarchgraph.extraction import AstImportFactSource
 from pyarchgraph.model import ImportSyntax
 
 
 def _cycle(tmp_path: Path, source: str):
     (tmp_path / "a.py").write_text(textwrap.dedent(source), encoding="utf-8")
     (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
-    return analyse(tmp_path, policy=GraphPolicy(include_type_only=False))
+    return AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
 
 
 @pytest.mark.parametrize(
@@ -66,17 +66,9 @@ def _cycle(tmp_path: Path, source: str):
 )
 def test_deferred_writes_do_not_prove_typing_only(tmp_path: Path, source: str) -> None:
     result = _cycle(tmp_path, source)
-    fact = next(f for f in result.import_facts if f.base_module == "b")
+    fact = next(f for f in result.facts if f.base_module == "b")
     assert not fact.type_only
     assert fact.syntax is ImportSyntax.IMPORT
-    assert result.complete
-    assert result.dependency_resolution_complete
-    assert check_status(result) == "fail"
-    assert {(e.source, e.target) for e in result.architecture_dependencies} == {
-        ("a", "b"),
-        ("b", "a"),
-    }
-    assert result.findings[0]["certainty"] == "definite"
 
 
 @pytest.mark.parametrize(
@@ -156,18 +148,10 @@ def test_deferred_and_annotation_loaders_retain_candidates(
     tmp_path: Path, source: str
 ) -> None:
     result = _cycle(tmp_path, source)
-    facts = [f for f in result.import_facts if f.base_module == "b"]
+    facts = [f for f in result.facts if f.base_module == "b"]
     assert len(facts) == 1
     assert facts[0].syntax is ImportSyntax.DYNAMIC_IMPORT
     assert not facts[0].type_only
-    assert result.complete
-    assert not result.dependency_resolution_complete
-    assert check_status(result) == "needs_review"
-    assert {(e.source, e.target) for e in result.architecture_dependencies} == {
-        ("a", "b"),
-        ("b", "a"),
-    }
-    assert result.findings[0]["certainty"] == "possible"
     assert any(d.code == "dynamic_import_ignored" for d in result.diagnostics)
 
 
@@ -184,10 +168,7 @@ def test_generic_class_parameter_is_visible_to_method(tmp_path: Path) -> None:
         Container().method()
         """,
     )
-    assert not next(f for f in result.import_facts if f.base_module == "b").type_only
-    assert result.complete
-    assert result.dependency_resolution_complete
-    assert check_status(result) == "fail"
+    assert not next(f for f in result.facts if f.base_module == "b").type_only
 
 
 @pytest.mark.skipif(sys.version_info < (3, 12), reason="PEP 695 syntax")
@@ -201,9 +182,8 @@ def test_generic_class_parameter_shadows_loader_in_method(tmp_path: Path) -> Non
                 load("b")
         """,
     )
-    assert not any(f.syntax is ImportSyntax.DYNAMIC_IMPORT for f in result.import_facts)
+    assert not any(f.syntax is ImportSyntax.DYNAMIC_IMPORT for f in result.facts)
     assert not result.diagnostics
-    assert check_status(result) == "pass"
 
 
 def test_comprehension_lambda_captures_iteration_variable(tmp_path: Path) -> None:
@@ -215,9 +195,8 @@ def test_comprehension_lambda_captures_iteration_variable(tmp_path: Path) -> Non
         callbacks[0]()
         """,
     )
-    assert not any(f.syntax is ImportSyntax.DYNAMIC_IMPORT for f in result.import_facts)
+    assert not any(f.syntax is ImportSyntax.DYNAMIC_IMPORT for f in result.facts)
     assert not result.diagnostics
-    assert check_status(result) == "pass"
 
 
 def test_method_annotation_sees_class_override(tmp_path: Path) -> None:
@@ -232,6 +211,5 @@ def test_method_annotation_sees_class_override(tmp_path: Path) -> None:
         Container.method.__annotations__
         """,
     )
-    assert not any(f.syntax is ImportSyntax.DYNAMIC_IMPORT for f in result.import_facts)
+    assert not any(f.syntax is ImportSyntax.DYNAMIC_IMPORT for f in result.facts)
     assert not result.diagnostics
-    assert check_status(result) == "pass"

@@ -1,19 +1,27 @@
-"""Bounded, deterministic findings with import evidence and semantic identity."""
+"""Check the structural import graph and explain each blocking concern."""
 
-from dataclasses import asdict
 from fnmatch import fnmatchcase
-import hashlib
-import json
 
 import networkx as nx
 
-from pyarchgraph.model import DependencyEdge, ImportFact
-from pyarchgraph.policy import DEFINITE_KINDS
+from pyarchgraph.model import (
+    CycleFinding,
+    DependencyEdge,
+    Diagnostic,
+    EvidenceLocation,
+    Finding,
+    FindingDependency,
+    ForbiddenDependencyFinding,
+    ImportFact,
+    ImportFinding,
+    ImportSyntax,
+    ResolutionKind,
+    SourceModule,
+    UnresolvedImport,
+    UnresolvedReason,
+)
 
-
-def semantic_id(kind: str, value: object) -> str:
-    encoded = json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()
-    return f"{kind}-{hashlib.sha256(encoded).hexdigest()}"
+DEFINITE_KINDS = frozenset({ResolutionKind.EXACT_MODULE, ResolutionKind.EXACT_BASE})
 
 
 def _cyclic_components(graph: nx.DiGraph) -> list[tuple[str, ...]]:
@@ -24,34 +32,26 @@ def _cyclic_components(graph: nx.DiGraph) -> list[tuple[str, ...]]:
     )
 
 
-def dependency_record(edge: DependencyEdge, facts: dict[str, ImportFact]) -> dict:
-    return {
-        "id": semantic_id("dependency", (edge.source, edge.target)),
-        "source": edge.source,
-        "target": edge.target,
-        "evidence": [
-            {
-                **asdict(facts[item.fact_id]),
-                "resolution_kind": item.resolution_kind.value,
-            }
-            for item in edge.evidence
-        ],
-    }
+def _location(fact: ImportFact, kind: ResolutionKind | None = None) -> EvidenceLocation:
+    return EvidenceLocation(
+        fact.path, fact.line, fact.column + 1, fact.source_segment, kind
+    )
 
 
 def build_findings(
     dependencies: tuple[DependencyEdge, ...],
     facts: tuple[ImportFact, ...],
-    forbidden_dependencies: tuple[tuple[str, str], ...] = (),
-) -> tuple[dict, ...]:
-    """One cycle witness per full cyclic SCC; never enumerate simple cycles.
+    modules: tuple[SourceModule, ...],
+    unresolved_imports: tuple[UnresolvedImport, ...],
+    diagnostics: tuple[Diagnostic, ...],
+    forbidden_dependencies: tuple[tuple[str, str], ...],
+) -> tuple[Finding, ...]:
+    """Build two graphs once, with one bounded witness per cyclic component.
 
-    A definite witness takes precedence if the component contains one. Members
-    that depend on uncertain edges are reported separately from definite cyclic
-    members. The witness is bounded by the component's node count.
+    Probable edges matter only when they participate in a violation. Missing
+    targets and dynamic calls independently identify gaps in static coverage.
     """
 
-    forbidden_dependencies = tuple(sorted(set(forbidden_dependencies)))
     facts_by_id = {fact.id: fact for fact in facts}
     by_pair = {(edge.source, edge.target): edge for edge in dependencies}
     graph = nx.DiGraph()
@@ -64,93 +64,118 @@ def build_findings(
             item.resolution_kind in DEFINITE_KINDS for item in by_pair[pair].evidence
         )
     )
-    definite_components = _cyclic_components(definite)
     definite_cyclic_members = {
-        member for group in definite_components for member in group
+        member for group in _cyclic_components(definite) for member in group
     }
-    definite_component_for = {
-        member: index
-        for index, group in enumerate(definite_components)
-        for member in group
-    }
-    findings = []
+
+    def dependency(pair: tuple[str, str], *, definite_only: bool) -> FindingDependency:
+        edge = by_pair[pair]
+        evidence = sorted(
+            (
+                (facts_by_id[item.fact_id], item.resolution_kind)
+                for item in edge.evidence
+                if not definite_only or item.resolution_kind in DEFINITE_KINDS
+            ),
+            key=lambda item: (
+                item[0].path,
+                item[0].line,
+                item[0].column,
+                item[1].value,
+            ),
+        )
+        return FindingDependency(
+            edge.source,
+            edge.target,
+            tuple(_location(fact, kind) for fact, kind in evidence),
+        )
+
+    findings: list[Finding] = []
     for members in _cyclic_components(graph):
-        member_set = set(members)
-        definite_members = sorted(member_set & definite_cyclic_members)
-        certainty = "definite" if definite_members else "possible"
+        definite_members = tuple(sorted(set(members) & definite_cyclic_members))
         witness_graph = (
             definite.subgraph(members) if definite_members else graph.subgraph(members)
         )
         start = definite_members[0] if definite_members else members[0]
-        witness_pairs = nx.find_cycle(witness_graph, source=start)
-        witness = []
-        for source, target in witness_pairs:
-            edge = by_pair[(source, target)]
-            if definite_members:
-                edge = DependencyEdge(
-                    source,
-                    target,
-                    tuple(
-                        item
-                        for item in edge.evidence
-                        if item.resolution_kind in DEFINITE_KINDS
-                    ),
-                )
-            witness.append(dependency_record(edge, facts_by_id))
-        internal_pairs = sorted(
-            (source, target)
-            for source in members
-            for target in graph.successors(source)
-            if target in member_set
-        )
-        definite_pairs = [
-            pair
-            for pair in internal_pairs
-            if pair[0] in definite_component_for
-            and definite_component_for.get(pair[1]) == definite_component_for[pair[0]]
-            and definite.has_edge(*pair)
-        ]
         findings.append(
-            {
-                "id": semantic_id("cycle", members),
-                "kind": "cycle",
-                "certainty": certainty,
-                "members": list(members),
-                "definite_members": definite_members,
-                "cyclic_dependencies": [list(pair) for pair in internal_pairs],
-                "definite_cyclic_dependencies": [list(pair) for pair in definite_pairs],
-                "witness": witness,
-            }
+            CycleFinding(
+                certainty="definite" if definite_members else "possible",
+                members=members,
+                definite_members=definite_members,
+                witness=tuple(
+                    dependency((source, target), definite_only=bool(definite_members))
+                    for source, target in nx.find_cycle(witness_graph, source=start)
+                ),
+            )
         )
-    for pair, edge in sorted(by_pair.items()):
-        matched = [
-            list(rule)
+    for pair in sorted(by_pair):
+        matched = tuple(
+            rule
             for rule in forbidden_dependencies
             if fnmatchcase(pair[0], rule[0]) and fnmatchcase(pair[1], rule[1])
-        ]
+        )
         if matched:
             findings.append(
-                {
-                    "id": semantic_id("forbidden", pair),
-                    "kind": "forbidden_dependency",
-                    "certainty": "definite" if definite.has_edge(*pair) else "possible",
-                    "rules": matched,
-                    "witness": [dependency_record(edge, facts_by_id)],
-                }
+                ForbiddenDependencyFinding(
+                    certainty="definite" if definite.has_edge(*pair) else "possible",
+                    rules=matched,
+                    witness=(dependency(pair, definite_only=False),),
+                )
             )
+    for unresolved in unresolved_imports:
+        if unresolved.reason is UnresolvedReason.NAMESPACE_BASE_UNMODELLED:
+            continue
+        evidence = sorted(
+            (facts_by_id[fact_id] for fact_id in unresolved.fact_ids),
+            key=lambda fact: (fact.path, fact.line, fact.column, fact.alias_index),
+        )
+        message = (
+            f"Internal import target {unresolved.requested!r} was not found."
+            if unresolved.reason is UnresolvedReason.MISSING_INTERNAL_TARGET
+            else f"Relative import {unresolved.requested!r} escapes its package."
+        )
+        findings.append(
+            ImportFinding(
+                kind="unresolved_import",
+                source=unresolved.source,
+                requested=unresolved.requested,
+                code=unresolved.reason.value,
+                message=message,
+                evidence=tuple(_location(fact) for fact in evidence),
+            )
+        )
+
+    modules_by_path = {module.path: module.id for module in modules}
+    dynamic_facts = {
+        (fact.path, fact.line, fact.column): fact
+        for fact in facts
+        if fact.syntax is ImportSyntax.DYNAMIC_IMPORT
+    }
+    for diagnostic in diagnostics:
+        if diagnostic.code != "dynamic_import_ignored":
+            continue
+        # Recognized call diagnostics always carry their exact AST location.
+        assert diagnostic.path is not None
+        assert diagnostic.line is not None
+        assert diagnostic.column is not None
+        fact = dynamic_facts.get((diagnostic.path, diagnostic.line, diagnostic.column))
+        findings.append(
+            ImportFinding(
+                kind="dynamic_import",
+                source=modules_by_path[diagnostic.path],
+                requested=fact.base_module if fact else None,
+                code=diagnostic.code,
+                message=diagnostic.message,
+                evidence=(
+                    _location(fact, ResolutionKind.DYNAMIC_LITERAL)
+                    if fact
+                    else EvidenceLocation(
+                        diagnostic.path,
+                        diagnostic.line,
+                        diagnostic.column + 1,
+                        diagnostic.source_segment,
+                        None,
+                    ),
+                ),
+            )
+        )
     return tuple(findings)
-
-
-def check_status(result) -> str:
-    """Three-valued policy result; a high heuristic score never clears a cycle."""
-    if any(finding["certainty"] == "definite" for finding in result.findings):
-        return "fail"
-    if (
-        not result.complete
-        or not result.scope_valid
-        or not result.modules
-        or not result.dependency_resolution_complete
-        or result.findings
-    ):
-        return "needs_review"
-    return "pass"

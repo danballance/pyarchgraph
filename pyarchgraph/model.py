@@ -2,16 +2,15 @@
 
 An edge ``A -> B`` means that module A contains import syntax that was
 statically resolved to source-backed module B.  It does not claim that the
-statement executes at runtime.  An analysis is complete exactly when it has
-no error diagnostics.
+statement executes at runtime. Incomplete analysis raises an error instead of
+producing a partial report.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal
 
 
 class Severity(str, Enum):
@@ -42,19 +41,6 @@ class ExternalClassification(str, Enum):
     EXTERNAL_UNKNOWN = "external_unknown"
 
 
-class View(str, Enum):
-    """Which graph the condensation DAG and diagram describe.
-
-    ``MODULE`` is the analysis's own grain: one node per source module.
-    ``PACKAGE`` projects those modules onto a package prefix before
-    condensing, which is a presentation choice — the module-level evidence in
-    an ``AnalysisResult`` is unchanged by it.
-    """
-
-    MODULE = "module"
-    PACKAGE = "package"
-
-
 class UnresolvedReason(str, Enum):
     MISSING_INTERNAL_TARGET = "missing_internal_target"
     NAMESPACE_BASE_UNMODELLED = "namespace_base_unmodelled"
@@ -67,15 +53,6 @@ class SourceModule:
     path: str
     is_package: bool
     parent_package: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class SourceLocation:
-    path: str
-    line: int
-    column: int
-    end_line: int | None
-    end_column: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,42 +84,15 @@ class Diagnostic:
     path: str | None = None
     line: int | None = None
     column: int | None = None
+    source_segment: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class FactCollection:
-    """Facts and diagnostics produced for a complete module inventory.
-
-    Returning a collection with no error diagnostics asserts that every given
-    module was processed successfully.  A fact source must emit an error for
-    each read, decode, parse, or equivalent indexing failure; otherwise the
-    orchestrator cannot truthfully calculate ``AnalysisResult.complete``.
-    """
+    """Every unreadable or unsupported input has an error diagnostic."""
 
     facts: tuple[ImportFact, ...]
     diagnostics: tuple[Diagnostic, ...] = ()
-
-
-class ImportFactSource(Protocol):
-    """Repository-level seam for collecting source-backed import facts.
-
-    Implementations receive the entire unambiguous inventory and must report
-    every processing failure as an error in the returned ``FactCollection``.
-    """
-
-    def collect(
-        self,
-        source_root: Path,
-        modules: tuple[SourceModule, ...],
-    ) -> FactCollection: ...
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedImport:
-    source: str
-    target: str
-    fact_id: str
-    resolution_kind: ResolutionKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,114 +132,60 @@ class ResolutionResult:
 
 
 @dataclass(frozen=True, slots=True)
-class GraphNode:
-    id: str
+class EvidenceLocation:
+    """Self-contained evidence; paths are relative to cwd, positions one-based."""
+
+    path: str
+    line: int
+    column: int
+    source_segment: str | None
+    resolution_kind: ResolutionKind | None
 
 
 @dataclass(frozen=True, slots=True)
-class RawDependency:
+class FindingDependency:
     source: str
     target: str
+    evidence: tuple[EvidenceLocation, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class DagNode:
-    id: str
+class CycleFinding:
+    certainty: Literal["definite", "possible"]
     members: tuple[str, ...]
-    cyclic: bool
+    definite_members: tuple[str, ...]
+    witness: tuple[FindingDependency, ...]
+    kind: Literal["cycle"] = field(default="cycle", init=False)
 
 
 @dataclass(frozen=True, slots=True)
-class DagEdge:
+class ForbiddenDependencyFinding:
+    certainty: Literal["definite", "possible"]
+    rules: tuple[tuple[str, str], ...]
+    witness: tuple[FindingDependency, ...]
+    kind: Literal["forbidden_dependency"] = field(
+        default="forbidden_dependency", init=False
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ImportFinding:
+    kind: Literal["unresolved_import", "dynamic_import"]
     source: str
-    target: str
-    raw_dependencies: tuple[RawDependency, ...]
+    requested: str | None
+    code: str
+    message: str
+    evidence: tuple[EvidenceLocation, ...]
+
+
+Finding = CycleFinding | ForbiddenDependencyFinding | ImportFinding
 
 
 @dataclass(frozen=True, slots=True)
-class Dag:
-    nodes: tuple[DagNode, ...]
-    edges: tuple[DagEdge, ...]
-    dependency_first_layers: tuple[tuple[str, ...], ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ArchitectureMetrics:
-    """Module-level counts and fractions before projection or condensation.
-
-    Active modules have an incoming or outgoing internal dependency, including
-    self-imports. Reachability counts ordered pairs of distinct modules. Fan-in
-    and fan-out count distinct dependency edges, including self-imports.
-    """
+class AnalysisReport:
+    """A completed analysis passes exactly when it has no findings."""
 
     module_count: int
-    active_module_count: int
-    isolated_module_count: int
     dependency_count: int
-    cyclic_component_count: int
-    cyclic_module_count: int
-    largest_cyclic_component_size: int
-    reachable_pair_count: int
-    max_fan_in: int
-    max_fan_out: int
-    cycle_fraction: float
-    reach_fraction: float
-
-    @property
-    def largest_cycle_size(self) -> int:
-        """Deprecated Python API alias; JSON uses the precise SCC name."""
-        return self.largest_cyclic_component_size
-
-
-@dataclass(frozen=True, slots=True)
-class ArchitectureQuality:
-    """An experimental structural score, with its inputs and limitations.
-
-    Scores are absent for empty or incomplete analyses. Metrics from an
-    incomplete analysis describe only the observed partial graph. Unresolved
-    and dynamic imports do not change completeness or invent graph edges.
-    """
-
-    formula_version: str
-    score: float | None
-    cycle_avoidance_score: float | None
-    dependency_isolation_score: float | None
-    unavailable_reason: (
-        Literal["incomplete_analysis", "no_modules", "invalid_scope"] | None
-    )
-    metrics: ArchitectureMetrics
-    unresolved_import_count: int
-    dynamic_import_warning_count: int
-
-
-@dataclass(frozen=True, slots=True)
-class AnalysisResult:
-    """One analysis, its provenance, and the graph derived from it.
-
-    ``excludes``, ``view`` and ``package_depth`` are recorded so a written
-    artifact states what it covered: without them a consumer cannot tell an
-    excluded package from an absent one. Provenance records the source root
-    relative to the project and the evidence policy; source locations remain
-    relative to the source root so reports are portable between machines.
-    """
-
-    complete: bool
-    python_version: str
-    excludes: tuple[str, ...]
-    view: View
-    package_depth: int | None
-    namespace_prefixes: tuple[str, ...]
-    modules: tuple[SourceModule, ...]
-    import_facts: tuple[ImportFact, ...]
-    dependencies: tuple[DependencyEdge, ...]
-    external_imports: tuple[ExternalImport, ...]
-    unresolved_imports: tuple[UnresolvedImport, ...]
-    dag: Dag
-    diagnostics: tuple[Diagnostic, ...]
-    quality: ArchitectureQuality
-    architecture_dependencies: tuple[DependencyEdge, ...] = ()
-    provenance: dict | None = None
-    findings: tuple[dict, ...] = ()
-    limitations: tuple[str, ...] = ()
-    scope_valid: bool = True
-    dependency_resolution_complete: bool = True
+    findings: tuple[Finding, ...]
+    schema_version: Literal["0.5"] = field(default="0.5", init=False)

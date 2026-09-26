@@ -95,10 +95,8 @@ def resolve_imports(
 
     for fact in facts:
         if fact.syntax in (ImportSyntax.IMPORT, ImportSyntax.DYNAMIC_IMPORT):
-            # ``base_module`` is the canonical extraction representation.  The
-            # fallback also makes the resolver tolerant of protocol-backed fact
-            # sources that retain an Import alias in ``imported_name``.
-            requested = fact.base_module or fact.imported_name or ""
+            assert fact.base_module is not None
+            requested = fact.base_module
             if requested in module_ids:
                 add_dependency(
                     fact,

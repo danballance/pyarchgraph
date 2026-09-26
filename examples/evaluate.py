@@ -1,161 +1,185 @@
-"""Print current corpus results beside the immutable reviewed measurements.
+"""Check every committed dependency scenario through the real CLI.
 
 Run from the repository root: python -m examples.evaluate [--json].
-All project code is read as source; no fixture application is imported.
+Fixture applications are read as source and are never imported or executed.
 """
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
 import json
+import subprocess
+import sys
 from pathlib import Path
-
-from pyarchgraph import analyse, render_json
-from pyarchgraph.findings import check_status
-from pyarchgraph.policy import GraphPolicy
-
+from typing import Any
 
 EXAMPLES = Path(__file__).resolve().parent
+REPOSITORY = EXAMPLES.parent
 
 
-def evaluate(project_ids: list[str] | None = None) -> dict:
-    """Use every root, exclusion and graph policy declared in the manifest."""
-    manifest = json.loads((EXAMPLES / "manifest.json").read_text(encoding="utf-8"))
-    baseline = json.loads(
-        (EXAMPLES / manifest["review_baseline"]).read_text(encoding="utf-8")
-    )
-    previous = {
-        (row["project"], row["variant"]): row for row in baseline["observations"]
-    }
-    rows = []
-    for project in manifest["projects"]:
+def load_manifest() -> dict[str, Any]:
+    return json.loads((EXAMPLES / "manifest.json").read_text(encoding="utf-8"))
+
+
+def iter_runs(project_ids: list[str] | None = None):
+    """Yield each project and its complete default/variant configuration."""
+    for project in load_manifest()["projects"]:
         if project_ids and project["id"] not in project_ids:
             continue
-        project_dir = EXAMPLES / "projects" / project["id"]
-        for variant in [None, *project.get("variants", [])]:
-            config = project if variant is None else variant
-            variant_id = None if variant is None else variant["id"]
-            desired = config["desired"]
-            rules = desired.get("forbidden_dependencies", []) + desired.get(
-                "directional_violations", []
-            )
-            result = analyse(
-                project_dir / config["source_root"],
-                project_root=project_dir,
-                excludes=tuple(config["exclusions"]),
-                expected_packages=tuple(config["expected_packages"]),
-                policy=GraphPolicy(**config["graph_policy"]),
-                forbidden_dependencies=tuple(tuple(rule) for rule in rules),
-            )
-            cleanup = json.loads(render_json(result))["cleanup"]
-            old = previous[(project["id"], variant_id)]
-            rows.append(
-                {
-                    "project": project["id"],
-                    "variant": variant_id,
-                    "category": project["category"],
-                    "baseline_score": old["score"],
-                    "baseline_cyclic_module_count": old["metrics"][
-                        "cyclic_module_count"
-                    ],
-                    "current_score": result.quality.score,
-                    "current_metrics": asdict(result.quality.metrics),
-                    "cleanup_violation_count": cleanup["violation_count"],
-                    "cleanup_possible_violation_count": cleanup[
-                        "possible_violation_count"
-                    ],
-                    "cleanup_counts": cleanup["counts"],
-                    "cleanup_complete": cleanup["cleanup_complete"],
-                    "definite_findings": sum(
-                        item["certainty"] == "definite" for item in result.findings
-                    ),
-                    "possible_findings": sum(
-                        item["certainty"] == "possible" for item in result.findings
-                    ),
-                    "check_status": check_status(result),
-                    "scope_valid": result.scope_valid,
-                    "dependency_resolution_complete": result.dependency_resolution_complete,
-                    "dynamic_import_warning_count": result.quality.dynamic_import_warning_count,
-                    "current_provenance": result.provenance,
-                }
-            )
-    return {
-        "reviewed_analyser": {
-            "version": baseline["analyser_version"],
-            "commit": baseline["analyser_commit"],
-            "formula_version": baseline["formula_version"],
-            "python_version": baseline["python_version"],
-        },
-        "results": rows,
-    }
+        yield project, None, project
+        for variant in project.get("variants", []):
+            yield project, variant["id"], variant
 
 
-def main() -> None:
-    manifest = json.loads((EXAMPLES / "manifest.json").read_text(encoding="utf-8"))
+def run_cli(
+    project_id: str, variant_id: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Analyze one configured run with the current Python interpreter."""
+    _, _, config = next(
+        item for item in iter_runs([project_id]) if item[1] == variant_id
+    )
+    root = EXAMPLES / "projects" / project_id / config["source_root"]
+    command = [sys.executable, "-m", "pyarchgraph", str(root)]
+    for pattern in config["exclusions"]:
+        command.extend(["--exclude", pattern])
+    for source, target in config["forbidden_dependencies"]:
+        command.extend(["--forbid", f"{source}:{target}"])
+    return subprocess.run(
+        command,
+        cwd=REPOSITORY,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+
+def _matches(actual: Any, expected: Any) -> bool:
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and all(
+            key in actual and _matches(actual[key], value)
+            for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return (
+            isinstance(actual, list)
+            and len(actual) == len(expected)
+            and all(_matches(left, right) for left, right in zip(actual, expected))
+        )
+    return actual == expected
+
+
+def check_result(
+    completed: subprocess.CompletedProcess[str], expected: dict[str, Any]
+) -> list[str]:
+    """Compare actual output to independent, committed acceptance expectations."""
+    errors = []
+    if completed.returncode != expected["exit_code"]:
+        errors.append(f"exit {completed.returncode}, expected {expected['exit_code']}")
+    if expected["outcome"] == "error":
+        if completed.stdout:
+            errors.append("analysis error emitted stdout")
+        if expected["error_contains"] not in completed.stderr:
+            errors.append(f"stderr must contain {expected['error_contains']!r}")
+        return errors
+
+    if completed.stderr:
+        errors.append(f"unexpected stderr: {completed.stderr.strip()}")
+    try:
+        report = json.loads(completed.stdout)
+    except (ValueError, TypeError):
+        return [*errors, "stdout is not a JSON report"]
+    if not isinstance(report, dict) or set(report) != {
+        "schema_version",
+        "module_count",
+        "dependency_count",
+        "findings",
+    }:
+        return [*errors, "report has an invalid top-level contract"]
+    if report["schema_version"] != "0.5":
+        errors.append("schema_version must be '0.5'")
+    for field in ("module_count", "dependency_count"):
+        if type(report[field]) is not int or report[field] != expected[field]:
+            errors.append(f"{field} is {report[field]!r}, expected {expected[field]}")
+    if not isinstance(report["findings"], list):
+        return [*errors, "findings must be a list"]
+    remaining = list(report["findings"])
+    for finding in expected["findings"]:
+        for index, actual in enumerate(remaining):
+            if _matches(actual, finding):
+                remaining.pop(index)
+                break
+        else:
+            errors.append(
+                f"missing expected finding: {json.dumps(finding, sort_keys=True)}"
+            )
+    if remaining:
+        errors.append(f"unexpected findings: {json.dumps(remaining, sort_keys=True)}")
+    return errors
+
+
+def evaluate(project_ids: list[str] | None = None) -> dict[str, Any]:
+    rows = []
+    for project, variant_id, config in iter_runs(project_ids):
+        expected = config["expected"]
+        completed = run_cli(project["id"], variant_id)
+        errors = check_result(completed, expected)
+        rows.append(
+            {
+                "project": project["id"],
+                "variant": variant_id,
+                "expected": expected["outcome"],
+                "actual": {0: "pass", 1: "fail", 2: "error"}.get(
+                    completed.returncode, f"exit {completed.returncode}"
+                ),
+                "matched": not errors,
+                "errors": errors,
+            }
+        )
+    return {"matched": all(row["matched"] for row in rows), "results": rows}
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--json",
-        action="store_true",
-        help="print results and current provenance as JSON",
+        "--json", action="store_true", help="print acceptance results as JSON"
     )
     parser.add_argument(
         "--project",
         action="append",
-        choices=[item["id"] for item in manifest["projects"]],
-        help="show this project and its variants; repeatable",
+        choices=[item["id"] for item in load_manifest()["projects"]],
+        help="check this project and its variants; repeatable",
     )
     args = parser.parse_args()
     report = evaluate(args.project)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
-        return
-
-    def score(value):
-        return "unavailable" if value is None else f"{value:.4f}"
-
-    table = [
-        [
-            "Project / variant", "Reviewed", "Current", "Debt", "Possible debt",
-            "Definite findings", "Possible findings", "Check",
-        ]
-    ]
-    for row in report["results"]:
-        label = row["project"] + (f"/{row['variant']}" if row["variant"] else "")
-        table.append(
-            [
-                label,
-                score(row["baseline_score"]),
-                score(row["current_score"]),
-                str(row["cleanup_violation_count"]),
-                str(row["cleanup_possible_violation_count"]),
-                str(row["definite_findings"]),
-                str(row["possible_findings"]),
-                row["check_status"],
-            ]
+    else:
+        table = [["Project / variant", "Expected", "Actual", "Acceptance"]]
+        for row in report["results"]:
+            label = row["project"] + (f"/{row['variant']}" if row["variant"] else "")
+            table.append(
+                [
+                    label,
+                    row["expected"],
+                    row["actual"],
+                    "OK" if row["matched"] else "MISMATCH",
+                ]
+            )
+        widths = [max(len(row[column]) for row in table) for column in range(4)]
+        print(f"Architecture corpus: {len(report['results'])} runs")
+        for row in table:
+            print("  ".join(value.ljust(width) for value, width in zip(row, widths)))
+        for row in report["results"]:
+            for error in row["errors"]:
+                print(f"{row['project']}/{row['variant'] or 'default'}: {error}")
+        print(
+            "All expectations matched."
+            if report["matched"]
+            else "Acceptance expectations did not match."
         )
-    widths = [max(len(row[column]) for row in table) for column in range(len(table[0]))]
-    print(f"Architecture corpus: {len(report['results'])} runs")
-    print(f"Reviewed implementation: {report['reviewed_analyser']['commit']}")
-    print()
-    for index, row in enumerate(table):
-        print("  ".join(value.ljust(width) for value, width in zip(row, widths)))
-        if index == 0:
-            print("  ".join("-" * width for width in widths))
-    print()
-    print(
-        "Debt counts definite policy violations; possible debt is separate. A lower total alone does not prove a safe edit."
-    )
-    print(
-        "Debt counts cyclic and forbidden dependencies; cycle findings group components. Zero debt is complete only when the check passes."
-    )
-    print(
-        "Reviewed/current scores remain advisory: padding can raise a score without resolving the original debt."
-    )
-    print(
-        "Manifest graph settings are explicit; tests are excluded unless the run deliberately includes them."
-    )
+    return 0 if report["matched"] else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

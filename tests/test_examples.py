@@ -1,107 +1,152 @@
-"""Acceptance corpus: source text is data, and fixture applications never run.
-
-Historical observations document reviewed defects; desired contracts exercise
-current behavior. Formula controls deliberately retain the documented heuristic
-limitations, so score dilution is never mistaken for resolution improvement.
-"""
+"""Acceptance scenarios are committed source data, never executable fixtures."""
 
 from __future__ import annotations
 
 import ast
-from functools import lru_cache
 import hashlib
 import json
+import subprocess
+from functools import cache
 from pathlib import Path
 
 import networkx as nx
 import pytest
 
-from pyarchgraph import analyse, render_json
-from pyarchgraph.findings import check_status
-from pyarchgraph.model import ImportSyntax
-from pyarchgraph.policy import GraphPolicy
-from pyarchgraph.provenance import compare_baseline
+from examples import evaluate
+from pyarchgraph.discovery import discover_modules
+from pyarchgraph.extraction import AstImportFactSource
+from pyarchgraph.model import ImportScope, ImportSyntax, UnresolvedReason
+from pyarchgraph.resolution import architecture_dependencies, resolve_imports
 
-
-EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
-MANIFEST = json.loads((EXAMPLES / "manifest.json").read_text(encoding="utf-8"))
+EXAMPLES = evaluate.EXAMPLES
+MANIFEST = evaluate.load_manifest()
 PROJECTS = {project["id"]: project for project in MANIFEST["projects"]}
+RUNS = [(project["id"], variant_id) for project, variant_id, _ in evaluate.iter_runs()]
 BASELINE = json.loads((EXAMPLES / "review-baseline.json").read_text(encoding="utf-8"))
-RUNS = [
-    (project["id"], variant["id"] if variant else None)
-    for project in MANIFEST["projects"]
-    for variant in [None, *project.get("variants", [])]
-]
 
 
 def _configuration(project_id, variant_id=None):
-    project = PROJECTS[project_id]
-    if variant_id is None:
-        return project
     return next(
-        variant for variant in project["variants"] if variant["id"] == variant_id
+        config
+        for _, variant, config in evaluate.iter_runs([project_id])
+        if variant == variant_id
     )
 
 
-@lru_cache(maxsize=None)
-def _analyse(project_id, variant_id=None):
+@cache
+def _completed(project_id, variant_id=None):
+    return evaluate.run_cli(project_id, variant_id)
+
+
+def _report(project_id, variant_id=None):
+    return json.loads(_completed(project_id, variant_id).stdout)
+
+
+@cache
+def _structure(project_id, variant_id=None):
+    """Inspect engine output without expanding the deliberately small public API."""
     config = _configuration(project_id, variant_id)
-    project_dir = EXAMPLES / "projects" / project_id
-    desired = config["desired"]
-    rules = desired.get("forbidden_dependencies", []) + desired.get(
-        "directional_violations", []
+    root = EXAMPLES / "projects" / project_id / config["source_root"]
+    discovery = discover_modules(root, excludes=tuple(config["exclusions"]))
+    collection = AstImportFactSource().collect(root, discovery.modules)
+    resolution = resolve_imports(
+        collection.facts, discovery.modules, discovery.namespace_prefixes
     )
-    return analyse(
-        project_dir / config["source_root"],
-        project_root=project_dir,
-        excludes=tuple(config["exclusions"]),
-        expected_packages=tuple(config["expected_packages"]),
-        policy=GraphPolicy(**config["graph_policy"]),
-        forbidden_dependencies=tuple(tuple(rule) for rule in rules),
-    )
+    return collection, resolution, architecture_dependencies(resolution.dependencies)
 
 
-def _pairs(result):
-    return {(edge.source, edge.target) for edge in result.architecture_dependencies}
+def _pairs(project_id, variant_id=None):
+    return {
+        (edge.source, edge.target) for edge in _structure(project_id, variant_id)[2]
+    }
 
 
-def _cycles(result, certainty=None):
+def _cycles(project_id, variant_id=None):
     return [
         finding
-        for finding in result.findings
+        for finding in _report(project_id, variant_id)["findings"]
         if finding["kind"] == "cycle"
-        and (certainty is None or finding["certainty"] == certainty)
     ]
 
 
-def test_manifest_and_historical_evidence_are_complete():
-    assert MANIFEST["schema_version"] == 1
-    assert len(PROJECTS) >= 25
+def _assert_evidence(evidence, project_id):
+    assert set(evidence) == {
+        "path",
+        "line",
+        "column",
+        "source_segment",
+        "resolution_kind",
+    }
+    assert not Path(evidence["path"]).is_absolute()
+    source_path = evaluate.REPOSITORY / evidence["path"]
+    assert source_path.is_relative_to(EXAMPLES / "projects" / project_id)
+    lines = source_path.read_text(encoding="utf-8").splitlines()
+    assert type(evidence["line"]) is int and 1 <= evidence["line"] <= len(lines)
+    assert type(evidence["column"]) is int and evidence["column"] >= 1
+    if evidence["source_segment"] is not None:
+        first_line = evidence["source_segment"].splitlines()[0]
+        assert first_line in lines[evidence["line"] - 1]
+    assert evidence["resolution_kind"] in {
+        None,
+        "exact_module",
+        "exact_base",
+        "probable_submodule",
+        "dynamic_literal",
+    }
+
+
+def _assert_finding_contract(finding, project_id):
+    kind = finding["kind"]
+    if kind in {"cycle", "forbidden_dependency"}:
+        fields = {"kind", "certainty", "witness"}
+        fields.update({"members", "definite_members"} if kind == "cycle" else {"rules"})
+        assert set(finding) == fields
+        assert finding["certainty"] in {"definite", "possible"}
+        assert finding["witness"]
+        for edge in finding["witness"]:
+            assert set(edge) == {"source", "target", "evidence"}
+            assert edge["evidence"]
+            for evidence in edge["evidence"]:
+                _assert_evidence(evidence, project_id)
+    else:
+        assert kind in {"unresolved_import", "dynamic_import"}
+        assert set(finding) == {
+            "kind",
+            "source",
+            "requested",
+            "code",
+            "message",
+            "evidence",
+        }
+        assert finding["message"] and finding["source"] and finding["code"]
+        assert finding["evidence"]
+        for evidence in finding["evidence"]:
+            _assert_evidence(evidence, project_id)
+
+
+def test_manifest_preserves_every_project_and_run():
+    assert MANIFEST["schema_version"] == 2
+    assert len(PROJECTS) == 25
+    assert len(RUNS) == 28
     assert set(PROJECTS) == {
         path.name for path in (EXAMPLES / "projects").iterdir() if path.is_dir()
     }
-    assert BASELINE["analyser_commit"] == "925276dbedbc324427a619aab91a35a719e8e183"
-    assert BASELINE["formula_version"] == "architecture-v1"
-    assert BASELINE["analyser_file_sha256"]
-    assert BASELINE["python_version"]
-    observations = {
-        (item["project"], item["variant"]): item for item in BASELINE["observations"]
+    assert set(RUNS) == {
+        (item["project"], item["variant"]) for item in BASELINE["observations"]
     }
-    assert set(observations) == set(RUNS)
+    outcomes = [config["expected"]["outcome"] for _, _, config in evaluate.iter_runs()]
+    assert outcomes.count("pass") == 6
+    assert outcomes.count("fail") == 21
+    assert outcomes.count("error") == 1
     for project_id, variant_id in RUNS:
         config = _configuration(project_id, variant_id)
         assert config["source_root"]
         assert isinstance(config["exclusions"], list)
-        assert isinstance(config["expected_packages"], list)
-        assert config["desired"]
-        assert (
-            config["observed_reviewed"]["score"]
-            == observations[(project_id, variant_id)]["score"]
-        )
+        assert isinstance(config["forbidden_dependencies"], list)
         assert (EXAMPLES / "projects" / project_id / "README.md").is_file()
 
 
-def test_committed_sources_match_reviewed_evidence_and_parse_without_execution():
+def test_committed_sources_match_archival_hashes_and_parse_without_execution():
     files = sorted((EXAMPLES / "projects").rglob("*.py"))
     assert len(files) >= 269
     assert {path.relative_to(EXAMPLES).as_posix() for path in files} == set(
@@ -121,235 +166,252 @@ def test_committed_sources_match_reviewed_evidence_and_parse_without_execution()
     RUNS,
     ids=[f"{name}/{variant or 'default'}" for name, variant in RUNS],
 )
-def test_desired_structural_outcomes(project_id, variant_id):
+def test_real_cli_matches_every_manifest_run(project_id, variant_id):
     config = _configuration(project_id, variant_id)
-    desired = config["desired"]
-    result = _analyse(project_id, variant_id)
-    assert result.complete is desired.get("complete", True)
-    assert result.scope_valid is desired.get("scope_valid", True)
-    for metric in (
-        "cyclic_module_count",
-        "dependency_count",
-        "reachable_pair_count",
-        "active_module_count",
-        "isolated_module_count",
-        "largest_cyclic_component_size",
-    ):
-        if metric in desired:
-            assert getattr(result.quality.metrics, metric) == desired[metric]
-    if "score" in desired:
-        assert result.quality.score == pytest.approx(desired["score"])
-    if not result.scope_valid:
-        assert result.quality.score is None
-    assert set(map(tuple, desired.get("required_dependencies", []))) <= _pairs(result)
-    assert not (
-        set(map(tuple, desired.get("forbidden_dependencies", []))) & _pairs(result)
-    )
-    for key, certainty in (
-        ("definite_cycle_count", "definite"),
-        ("candidate_cycle_count", "possible"),
-    ):
-        if key in desired:
-            assert len(_cycles(result, certainty)) == desired[key]
-    if desired.get("uncertainty_must_be_reported"):
-        assert not result.dependency_resolution_complete
-        assert check_status(result) == "needs_review"
-    if desired.get("must_not_claim_safe"):
-        assert check_status(result) != "pass"
-    reasons = {item.reason.value for item in result.unresolved_imports}
-    assert set(desired.get("unresolved_reasons", [])) <= reasons
-    assert not (set(desired.get("forbidden_unresolved_reasons", [])) & reasons)
-    if "directional_violations" in desired:
-        forbidden = {
-            tuple((item["source"], item["target"]))
-            for finding in result.findings
-            if finding["kind"] == "forbidden_dependency"
-            for item in finding["witness"]
-        }
-        assert forbidden == set(map(tuple, desired["directional_violations"]))
-    if "dynamic_calls" in desired:
-        assert result.quality.dynamic_import_warning_count == desired["dynamic_calls"]
-        assert not result.dependency_resolution_complete
-        literal_targets = {
-            fact.base_module
-            for fact in result.import_facts
-            if fact.syntax is ImportSyntax.DYNAMIC_IMPORT
-        }
-        assert literal_targets == set(desired.get("literal_dynamic_targets", []))
-
-
-def test_historical_failures_are_evidence_not_current_requirements():
-    old = {
-        (item["project"], item["variant"]): item for item in BASELINE["observations"]
-    }
-    assert old[("spelling_relative", None)]["score"] == pytest.approx(100 / 3)
-    assert old[("spelling_absolute", None)]["score"] == 85
-    assert old[("src_root_hazard", "incorrect_repository_root")]["complete"]
-    assert old[("src_root_hazard", "incorrect_repository_root")]["score"] == 100
-    assert old[("dynamic_aliases", None)]["dynamic_import_warning_count"] == 0
-    assert (
-        _analyse("spelling_relative").quality.score
-        == _analyse("spelling_absolute").quality.score
-    )
-    assert (
-        _analyse("src_root_hazard", "incorrect_repository_root").quality.score is None
-    )
-    assert _analyse("dynamic_aliases").quality.dynamic_import_warning_count > 0
-
-
-def test_formula_dilution_never_clears_the_unchanged_definite_cycle():
-    project_ids = [
-        "definite_cycle",
-        "cycle_with_independent_pair",
-        "cycle_with_49_pairs",
-        "cycle_with_test_padding",
-    ]
-    results = [_analyse(name) for name in project_ids]
-    assert [result.quality.score for result in results] == pytest.approx(
-        [0, 57.5, 98.44545454545455, 98.03921568627452]
-    )
-    identities = set()
-    for result in results:
-        assert check_status(result) == "fail"
-        (finding,) = _cycles(result, "definite")
-        assert set(finding["members"]) == {"orders", "inventory"}
-        identities.add(finding["id"])
-    assert len(identities) == 1
-    assert _analyse("cycle_with_test_padding", "production_only").quality.score == 0
-    assert _analyse("cycle_with_isolated_modules").quality.score == 0
-
-
-def test_formula_reachability_blind_spot_requires_a_directional_rule():
-    chain = _analyse("layered_service")
-    dense = _analyse("dense_ordered_dag")
-    assert chain.quality.score == dense.quality.score == 85
-    assert (
-        chain.quality.metrics.reachable_pair_count
-        == dense.quality.metrics.reachable_pair_count
-        == 6
-    )
-    assert chain.quality.metrics.dependency_count == 3
-    assert dense.quality.metrics.dependency_count == 6
-    assert check_status(chain) == "pass"
-    assert check_status(dense) == "fail"
-
-
-def test_submodule_spelling_preserves_the_same_architecture_and_raw_evidence():
-    relative = _analyse("spelling_relative")
-    absolute = _analyse("spelling_absolute")
-    assert (
-        _pairs(relative) == _pairs(absolute) == {("pkg", "pkg.a"), ("pkg.a", "pkg.b")}
-    )
-    assert relative.quality.score == absolute.quality.score == 85
-    assert not _cycles(relative)
-    assert not _cycles(absolute)
-    assert {(edge.source, edge.target) for edge in relative.dependencies} != {
-        (edge.source, edge.target) for edge in absolute.dependencies
-    }
-    assert {fact.source_segment for fact in relative.import_facts} != {
-        fact.source_segment for fact in absolute.import_facts
-    }
-
-
-@pytest.mark.parametrize(
-    "project_id,policy",
-    [
-        ("type_only_cycle", GraphPolicy(include_type_only=False)),
-        ("local_import_cycle", GraphPolicy(include_local=False)),
-        ("mixed_import_evidence", GraphPolicy(include_type_only=False)),
-    ],
-)
-def test_evidence_filters_keep_edges_with_any_remaining_support(project_id, policy):
-    project = PROJECTS[project_id]
-    root = EXAMPLES / "projects" / project_id
-    result = analyse(root, policy=policy)
-    prefix = "without_type_only" if not policy.include_type_only else "without_local"
-    assert (
-        result.quality.metrics.dependency_count
-        == project["desired"][f"{prefix}_dependency_count"]
-    )
-    assert (
-        result.quality.metrics.cyclic_module_count
-        == project["desired"][f"{prefix}_cyclic_module_count"]
-    )
-    if project_id == "mixed_import_evidence":
-        assert check_status(result) == "fail"
-        facts = {fact.id: fact for fact in result.import_facts}
-        assert all(
-            not facts[evidence.fact_id].type_only
-            for edge in result.architecture_dependencies
-            for evidence in edge.evidence
-        )
+    completed = _completed(project_id, variant_id)
+    assert evaluate.check_result(completed, config["expected"]) == []
+    if config["expected"]["outcome"] == "error":
+        return
+    for finding in _report(project_id, variant_id)["findings"]:
+        _assert_finding_contract(finding, project_id)
 
 
 @pytest.mark.parametrize(
     "project_id",
-    [name for name in PROJECTS if "bounded_witness_count" in PROJECTS[name]["desired"]]
-    + ["self_import"],
+    [name for name, project in PROJECTS.items() if project.get("structural")],
 )
-def test_component_findings_have_bounded_valid_witnesses_with_source_locations(
-    project_id,
-):
-    result = _analyse(project_id)
-    findings = _cycles(result)
-    assert len(findings) == PROJECTS[project_id]["desired"].get(
-        "bounded_witness_count", 1
+def test_declared_structural_relationships(project_id):
+    expected = PROJECTS[project_id]["structural"]
+    pairs = _pairs(project_id)
+    assert set(map(tuple, expected.get("required_dependencies", []))) <= pairs
+    assert not set(map(tuple, expected.get("absent_dependencies", []))) & pairs
+
+
+def test_padding_does_not_conceal_or_change_the_original_cycle():
+    names = [
+        "definite_cycle",
+        "cycle_with_independent_pair",
+        "cycle_with_49_pairs",
+        "cycle_with_test_padding",
+        "cycle_with_isolated_modules",
+    ]
+    for name in names:
+        assert _completed(name).returncode == 1
+        (finding,) = _cycles(name)
+        assert finding["certainty"] == "definite"
+        assert (
+            finding["members"] == finding["definite_members"] == ["inventory", "orders"]
+        )
+    default = _report("cycle_with_test_padding")
+    production = _report("cycle_with_test_padding", "production_only")
+    assert default == production
+    assert default["module_count"] == default["dependency_count"] == 2
+
+
+def test_directional_rule_rejects_a_shortcut_in_an_acyclic_graph():
+    assert _completed("layered_service").returncode == 0
+    assert _completed("dense_ordered_dag").returncode == 1
+    assert not _cycles("dense_ordered_dag")
+    assert nx.is_directed_acyclic_graph(nx.DiGraph(_pairs("dense_ordered_dag")))
+    (finding,) = _report("dense_ordered_dag")["findings"]
+    assert finding["kind"] == "forbidden_dependency"
+    assert finding["rules"] == [["presentation", "repository"]]
+
+
+def test_submodule_spelling_preserves_architecture_and_original_syntax():
+    relative = _structure("spelling_relative")
+    absolute = _structure("spelling_absolute")
+    assert (
+        _pairs("spelling_relative")
+        == _pairs("spelling_absolute")
+        == {("pkg", "pkg.a"), ("pkg.a", "pkg.b")}
     )
-    source_root = (
-        EXAMPLES / "projects" / project_id / PROJECTS[project_id]["source_root"]
+    assert _report("spelling_relative") == _report("spelling_absolute")
+    assert {fact.source_segment for fact in relative[0].facts} != {
+        fact.source_segment for fact in absolute[0].facts
+    }
+    assert {(edge.source, edge.target) for edge in relative[1].dependencies} != {
+        (edge.source, edge.target) for edge in absolute[1].dependencies
+    }
+
+
+def test_local_and_typing_only_imports_always_contribute_to_cycles():
+    typing_collection = _structure("type_only_cycle")[0]
+    assert sum(fact.type_only for fact in typing_collection.facts) == 2
+    local_collection = _structure("local_import_cycle")[0]
+    assert all(fact.scope is ImportScope.LOCAL for fact in local_collection.facts)
+    for name in ("type_only_cycle", "local_import_cycle"):
+        assert _report(name)["dependency_count"] == 2
+        assert len(_cycles(name)) == 1
+        assert _completed(name).returncode == 1
+
+
+def test_duplicate_import_sites_preserve_evidence_without_inflating_edge_count():
+    report = _report("mixed_import_evidence")
+    assert report["dependency_count"] == 2
+    (cycle,) = report["findings"]
+    service_edge = next(
+        edge for edge in cycle["witness"] if edge["source"] == "service"
     )
+    assert [item["line"] for item in service_edge["evidence"]] == [3, 5]
+    collection, _, _ = _structure("mixed_import_evidence")
+    assert {
+        fact.type_only
+        for fact in collection.facts
+        if fact.source == "service" and fact.base_module == "model"
+    } == {True, False}
+
+
+@pytest.mark.parametrize(
+    "project_id,variant_id",
+    [
+        (name, variant)
+        for name, variant in RUNS
+        if any(
+            finding["kind"] == "cycle"
+            for finding in _configuration(name, variant)["expected"].get("findings", [])
+        )
+    ],
+)
+def test_every_component_has_one_bounded_valid_cycle_witness(project_id, variant_id):
+    pairs = _pairs(project_id, variant_id)
+    components = [
+        component
+        for component in nx.strongly_connected_components(nx.DiGraph(pairs))
+        if len(component) > 1 or (next(iter(component)), next(iter(component))) in pairs
+    ]
+    findings = _cycles(project_id, variant_id)
+    assert len(findings) == len(components)
+    assert {tuple(finding["members"]) for finding in findings} == {
+        tuple(sorted(component)) for component in components
+    }
     for finding in findings:
         witness = finding["witness"]
         assert 1 <= len(witness) <= len(finding["members"])
-        assert witness[-1]["target"] == witness[0]["source"]
+        assert len({edge["source"] for edge in witness}) == len(witness)
+        assert set(finding["definite_members"]) <= set(finding["members"])
         for index, edge in enumerate(witness):
+            assert (edge["source"], edge["target"]) in pairs
             assert edge["target"] == witness[(index + 1) % len(witness)]["source"]
-            assert edge["evidence"]
-            for evidence in edge["evidence"]:
-                lines = (
-                    (source_root / evidence["path"])
-                    .read_text(encoding="utf-8")
-                    .splitlines()
-                )
-                assert evidence["line"] >= 1
-                assert evidence["source_segment"] in lines[evidence["line"] - 1]
+    if project_id == "self_import":
+        assert len(findings[0]["witness"]) == 1
     if project_id == "scc_not_simple_cycle":
-        graph = nx.DiGraph(_pairs(result))
-        assert max(map(len, nx.simple_cycles(graph))) == 2
-        assert result.quality.metrics.largest_cyclic_component_size == 3
+        assert max(map(len, nx.simple_cycles(nx.DiGraph(pairs)))) == 2
+        assert len(findings[0]["members"]) == 3
 
 
-def test_missing_targets_and_namespace_bases_have_distinct_resolution_status():
-    missing = _analyse("missing_internal_target")
-    namespace = _analyse("valid_namespace_package")
-    assert missing.complete and namespace.complete
-    assert not missing.dependency_resolution_complete
-    assert "missing_internal_target" not in {
-        item.reason.value for item in namespace.unresolved_imports
-    }
-    # Namespace bases may remain as explanatory unresolved records. A definite
-    # child import still supports the relationship when its candidate duplicate
-    # is filtered; no missing source file should be invented.
-    assert _pairs(namespace) == {("plugins.cli", "plugins.readers.csv_reader")}
-
-
-def test_location_edits_preserve_violation_and_dependency_identity():
-    project_dir = EXAMPLES / "projects" / "location_only_edit"
-    # Treat before/after as two checkouts of the same configured import root.
-    before = analyse(project_dir / "before", project_root=project_dir / "before")
-    after = analyse(project_dir / "after", project_root=project_dir / "after")
-    assert _pairs(before) == _pairs(after)
-    assert {fact.id for fact in before.import_facts} != {
-        fact.id for fact in after.import_facts
-    }
-    assert [item["id"] for item in before.findings] == [
-        item["id"] for item in after.findings
-    ]
-    old_document, new_document = (
-        json.loads(render_json(before)),
-        json.loads(render_json(after)),
+def test_missing_targets_are_distinct_from_valid_namespace_bases():
+    namespace = _structure("valid_namespace_package")[1]
+    assert not any(
+        item.reason is UnresolvedReason.MISSING_INTERNAL_TARGET
+        for item in namespace.unresolved_imports
     )
-    comparison = compare_baseline(new_document, old_document)
-    assert comparison["added_dependencies"] == []
-    assert comparison["removed_dependencies"] == []
-    assert comparison["new_definite_cyclic_dependencies"] == []
+    assert _pairs("valid_namespace_package") == {
+        ("plugins.cli", "plugins.readers.csv_reader")
+    }
+    assert _report("valid_namespace_package")["findings"] == []
+    (missing,) = _report("missing_internal_target")["findings"]
+    assert missing["code"] == "missing_internal_target"
+    assert (
+        missing["evidence"][0]["path"]
+        == "examples/projects/missing_internal_target/catalog/api.py"
+    )
+    assert missing["evidence"][0]["line"] == 2
+
+
+@pytest.mark.parametrize(
+    "project_id,lines",
+    [
+        ("dynamic_literal", [5, 8]),
+        ("dynamic_aliases", [7, 10, 13]),
+        ("dynamic_nonliteral", [6, 9]),
+    ],
+)
+def test_each_recognized_dynamic_call_remains_visible(project_id, lines):
+    findings = [
+        finding
+        for finding in _report(project_id)["findings"]
+        if finding["kind"] == "dynamic_import"
+    ]
+    assert (
+        sorted(
+            evidence["line"] for finding in findings for evidence in finding["evidence"]
+        )
+        == lines
+    )
+    assert all(
+        finding["evidence"][0]["path"] == f"examples/projects/{project_id}/loader.py"
+        for finding in findings
+    )
+    literals = {
+        fact.base_module
+        for fact in _structure(project_id)[0].facts
+        if fact.syntax is ImportSyntax.DYNAMIC_IMPORT
+    }
+    assert literals == (set() if project_id == "dynamic_nonliteral" else {"plugin"})
+
+
+def test_documentation_edits_preserve_semantic_findings_and_update_locations():
+    before = _report("location_only_edit")
+    after = _report("location_only_edit", "after_documentation_edit")
+    assert _pairs("location_only_edit") == _pairs(
+        "location_only_edit", "after_documentation_edit"
+    )
+    (old_cycle,) = before["findings"]
+    (new_cycle,) = after["findings"]
+    assert {key: value for key, value in old_cycle.items() if key != "witness"} == {
+        key: value for key, value in new_cycle.items() if key != "witness"
+    }
+    for old_edge, new_edge in zip(old_cycle["witness"], new_cycle["witness"]):
+        assert (old_edge["source"], old_edge["target"]) == (
+            new_edge["source"],
+            new_edge["target"],
+        )
+        for old_evidence, new_evidence in zip(
+            old_edge["evidence"], new_edge["evidence"]
+        ):
+            assert new_evidence["path"] == old_evidence["path"].replace(
+                "/before/", "/after/"
+            )
+            assert new_evidence["line"] == old_evidence["line"] + 2
+            for field in ("column", "source_segment", "resolution_kind"):
+                assert new_evidence[field] == old_evidence[field]
+
+
+def test_cli_json_is_deterministic_across_independent_processes():
+    first = _completed("dense_cyclic_component")
+    second = evaluate.run_cli("dense_cyclic_component")
+    assert (first.returncode, first.stdout, first.stderr) == (
+        second.returncode,
+        second.stdout,
+        second.stderr,
+    )
+
+
+def test_evaluator_treats_an_expected_failure_as_success():
+    expected = PROJECTS["definite_cycle"]["expected"]
+    assert evaluate.check_result(_completed("definite_cycle"), expected) == []
+
+
+def test_evaluator_rejects_changed_counts_certainty_and_extra_findings():
+    completed = _completed("definite_cycle")
+    expected = PROJECTS["definite_cycle"]["expected"]
+    report = json.loads(completed.stdout)
+    report["module_count"] += 1
+    report["findings"][0]["certainty"] = "possible"
+    altered = subprocess.CompletedProcess(
+        completed.args, completed.returncode, json.dumps(report), ""
+    )
+    errors = evaluate.check_result(altered, expected)
+    assert any("module_count" in error for error in errors)
+    assert any("missing expected finding" in error for error in errors)
+    assert any("unexpected findings" in error for error in errors)
+
+
+def test_evaluator_returns_nonzero_for_a_mismatched_expectation(monkeypatch, capsys):
+    monkeypatch.setattr(
+        evaluate, "evaluate", lambda projects: {"matched": False, "results": []}
+    )
+    monkeypatch.setattr("sys.argv", ["examples.evaluate", "--json"])
+    assert evaluate.main() == 1
+    assert json.loads(capsys.readouterr().out)["matched"] is False

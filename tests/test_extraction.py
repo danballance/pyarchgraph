@@ -1,18 +1,17 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
-from pathlib import Path
 import random
+from pathlib import Path
 
 import pytest
 
-from pyarchgraph import extraction
-from pyarchgraph.analysis import analyse
+from pyarchgraph import analyse, extraction
+from pyarchgraph.discovery import discover_modules
 from pyarchgraph.extraction import AstImportFactSource
 from pyarchgraph.model import ImportScope, ImportSyntax, Severity, SourceModule
-from pyarchgraph.policy import GraphPolicy
-from pyarchgraph.findings import check_status
 
 
 def _module(
@@ -79,6 +78,74 @@ from .. import *
     assert result.facts[0].end_line == 1
     assert result.facts[0].end_column == len("import alpha.beta, gamma as g")
     assert all(fact.scope is ImportScope.MODULE for fact in result.facts)
+
+
+def test_unicode_fact_and_dynamic_diagnostic_columns_count_characters(
+    tmp_path: Path,
+) -> None:
+    source = (
+        "é = '\u2028🦉'; import bêta\n"
+        "é = 1; __import__('bêta')\n"
+        "é = 1; __import__(target)\n"
+        "__import__(\n    '插件')\n"
+    )
+    (tmp_path / "mod.py").write_text(source, encoding="utf-8")
+    result = AstImportFactSource().collect(tmp_path, (_module("mod", "mod.py"),))
+    lines = source.split("\n")
+
+    assert [(fact.line, fact.column) for fact in result.facts] == [
+        (1, lines[0].index("import")),
+        (2, lines[1].index("__import__")),
+        (4, 0),
+    ]
+    for fact in result.facts:
+        assert fact.end_line is not None and fact.end_column is not None
+        assert fact.end_column == len(lines[fact.end_line - 1])
+        selected = lines[fact.line - 1 : fact.end_line]
+        selected[-1] = selected[-1][: fact.end_column]
+        selected[0] = selected[0][fact.column :]
+        assert "\n".join(selected) == fact.source_segment
+    assert [(item.line, item.column) for item in result.diagnostics] == [
+        (2, lines[1].index("__import__")),
+        (3, lines[2].index("__import__")),
+        (4, 0),
+    ]
+
+
+def test_unicode_columns_are_one_based_in_public_findings(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text(
+        "é = 1; import b\né = 1; __import__('b')\né = 1; __import__(target)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "b.py").write_text("", encoding="utf-8")
+    report = analyse(tmp_path, forbidden_dependencies=(("a", "b"),))
+    boundary, *dynamic = report.findings
+    assert boundary.kind == "forbidden_dependency"
+    assert [(item.line, item.column) for item in boundary.witness[0].evidence] == [
+        (1, 8),
+        (2, 8),
+    ]
+    assert [(item.kind, item.requested) for item in dynamic] == [
+        ("dynamic_import", "b"),
+        ("dynamic_import", None),
+    ]
+    assert [(item.evidence[0].line, item.evidence[0].column) for item in dynamic] == [
+        (2, 8),
+        (3, 8),
+    ]
+
+
+def test_unicode_syntax_error_columns_are_not_converted_twice(tmp_path: Path) -> None:
+    source = "é = 1; import\n"
+    (tmp_path / "mod.py").write_text(source, encoding="utf-8")
+    with pytest.raises(SyntaxError) as caught:
+        ast.parse(source)
+    result = AstImportFactSource().collect(tmp_path, (_module("mod", "mod.py"),))
+
+    (diagnostic,) = result.diagnostics
+    assert diagnostic.code == "source_syntax_error"
+    assert caught.value.offset is not None
+    assert diagnostic.column == caught.value.offset - 1
 
 
 def test_scope_and_exact_type_checking_guard_semantics(tmp_path: Path) -> None:
@@ -302,8 +369,10 @@ copy_builtin("pkg.third")
     "source",
     [
         'from importlib import import_module as load\nfor load in load("b"):\n    pass\n',
-        "import importlib as loader\nclass C:\n    loader = object()\n"
-        '    result = [loader.import_module("b") for _ in [1]]\n',
+        (
+            "import importlib as loader\nclass C:\n    loader = object()\n"
+            '    result = [loader.import_module("b") for _ in [1]]\n'
+        ),
         'from importlib import import_module as load\nclass load:\n    result = load("b")\n',
     ],
 )
@@ -313,16 +382,12 @@ def test_dynamic_aliases_use_runtime_binding_order_and_class_comprehension_scope
     (tmp_path / "a.py").write_text(source, encoding="utf-8")
     (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
 
-    result = analyse(tmp_path)
+    result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
 
-    assert check_status(result) == "needs_review"
     dynamic = [
-        fact
-        for fact in result.import_facts
-        if fact.syntax is ImportSyntax.DYNAMIC_IMPORT
+        fact for fact in result.facts if fact.syntax is ImportSyntax.DYNAMIC_IMPORT
     ]
     assert [fact.base_module for fact in dynamic] == ["b"]
-    assert result.findings[0]["certainty"] == "possible"
 
 
 @pytest.mark.parametrize(
@@ -333,18 +398,15 @@ def test_dynamic_aliases_use_runtime_binding_order_and_class_comprehension_scope
         "from typing import TYPE_CHECKING as TC\ndef f(TC):\n    if TC:\n        import b\n",
     ],
 )
-def test_rebound_typing_guards_cannot_hide_cycles_under_typing_exclusion(
+def test_rebound_typing_guards_are_not_classified_as_type_only(
     tmp_path: Path, source: str
 ) -> None:
     (tmp_path / "a.py").write_text(source, encoding="utf-8")
     (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
 
-    result = analyse(tmp_path, policy=GraphPolicy(include_type_only=False))
+    result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
 
-    assert check_status(result) == "fail"
-    assert not next(
-        fact for fact in result.import_facts if fact.base_module == "b"
-    ).type_only
+    assert not next(fact for fact in result.facts if fact.base_module == "b").type_only
 
 
 def test_simple_assigned_typing_alias_keeps_type_only_classification(
@@ -356,12 +418,9 @@ def test_simple_assigned_typing_alias_keeps_type_only_classification(
     )
     (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
 
-    result = analyse(tmp_path, policy=GraphPolicy(include_type_only=False))
+    result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
 
-    assert check_status(result) == "pass"
-    assert next(
-        fact for fact in result.import_facts if fact.base_module == "b"
-    ).type_only
+    assert next(fact for fact in result.facts if fact.base_module == "b").type_only
 
 
 def test_read_decode_and_parse_failures_are_stable_and_do_not_stop_collection(
@@ -507,25 +566,3 @@ def test_raw_collection_has_same_evidence_without_assigning_ids(tmp_path: Path) 
     assert [fact.id for fact in raw.facts] == ["", ""]
     assert extraction.canonicalise_fact_ids(raw.facts) == canonical.facts
     assert raw.diagnostics == canonical.diagnostics
-
-
-def test_default_analysis_assigns_fact_ids_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    (tmp_path / "a.py").write_text("import b\n", encoding="utf-8")
-    (tmp_path / "b.py").write_text("VALUE = 1\n", encoding="utf-8")
-    original = extraction._assign_fact_ids
-    calls = []
-
-    def recording_assign(facts):
-        collected = tuple(facts)
-        calls.append(collected)
-        return original(collected)
-
-    monkeypatch.setattr(extraction, "_assign_fact_ids", recording_assign)
-    result = analyse(tmp_path)
-
-    assert len(calls) == 1
-    assert len(calls[0]) == 1
-    assert calls[0][0].id == ""
-    assert result.import_facts[0].id.startswith("fact-")

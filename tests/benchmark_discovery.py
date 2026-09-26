@@ -62,7 +62,9 @@ def _quadratic_prefix_scan(candidates: tuple[_Candidate, ...]) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sizes", nargs="+", type=int, default=[1000, 2000, 4000, 8000])
+    parser.add_argument(
+        "--sizes", nargs="+", type=int, default=[1000, 2000, 4000, 8000]
+    )
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--case", choices=("flat", "namespaces"), default="flat")
     parser.add_argument("--compare-quadratic", action="store_true")
@@ -79,7 +81,9 @@ def main() -> None:
             retained, diagnostics = _remove_ambiguous_groups(candidates)
             samples.append(perf_counter() - started)
             if retained != candidates or diagnostics:
-                raise RuntimeError("Discovery changed the unambiguous fixture inventory")
+                raise RuntimeError(
+                    "Discovery changed the unambiguous fixture inventory"
+                )
         row: dict[str, object] = {
             "modules": size,
             "helper_seconds": [round(sample, 6) for sample in samples],

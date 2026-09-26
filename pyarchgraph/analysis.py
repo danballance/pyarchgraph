@@ -1,130 +1,90 @@
-"""Orchestrate the facts -> graph -> evidence analysis pipeline."""
+"""Discover, resolve, and check one explicit Python import root."""
 
-from __future__ import annotations
-
+import os
 from dataclasses import replace
-import sys
 from pathlib import Path
 
 from pyarchgraph.discovery import discover_modules
-from pyarchgraph.extraction import AstImportFactSource, canonicalise_fact_ids
-from pyarchgraph.graph_ops import build_dag
+from pyarchgraph.extraction import AstImportFactSource
 from pyarchgraph.findings import build_findings
-from pyarchgraph.model import (
-    AnalysisResult,
-    Diagnostic,
-    ImportFactSource,
-    Severity,
-    UnresolvedReason,
-    View,
-)
-from pyarchgraph.projection import build_package_dag
-from pyarchgraph.policy import (
-    DEFINITE_KINDS,
-    GraphPolicy,
-    TEST_EXCLUDES,
-    filter_dependencies,
-)
-from pyarchgraph.provenance import build_provenance
-from pyarchgraph.quality import calculate_quality
+from pyarchgraph.model import AnalysisReport, Diagnostic, Severity
 from pyarchgraph.resolution import architecture_dependencies, resolve_imports
 
-DEFAULT_PACKAGE_DEPTH = 2
+TEST_EXCLUDES = ("tests", "test_*.py", "*_test.py")
 
 
-def _diagnostic_key(
-    diagnostic: Diagnostic,
-) -> tuple[str, str, str, int, int, str]:
-    return (
-        diagnostic.severity.value,
-        diagnostic.code,
-        diagnostic.path or "",
-        diagnostic.line if diagnostic.line is not None else -1,
-        diagnostic.column if diagnostic.column is not None else -1,
-        diagnostic.message,
-    )
+class AnalysisError(ValueError):
+    """The selected sources cannot produce a complete dependency check."""
+
+
+def _raise_errors(diagnostics: tuple[Diagnostic, ...]) -> None:
+    messages = []
+    for diagnostic in diagnostics:
+        if diagnostic.severity is not Severity.ERROR:
+            continue
+        location = diagnostic.path or ""
+        if diagnostic.line is not None:
+            location += f":{diagnostic.line}"
+        if diagnostic.column is not None:
+            location += f":{diagnostic.column + 1}"
+        prefix = f"{location}: " if location else ""
+        messages.append(f"{prefix}[{diagnostic.code}]: {diagnostic.message}")
+    if messages:
+        raise AnalysisError("\n".join(messages))
 
 
 def analyse(
     source_root: Path,
     *,
     excludes: tuple[str, ...] = (),
-    view: View = View.MODULE,
-    package_depth: int = DEFAULT_PACKAGE_DEPTH,
-    fact_source: ImportFactSource | None = None,
-    project_root: Path | None = None,
-    expected_packages: tuple[str, ...] = (),
-    policy: GraphPolicy = GraphPolicy(),
     forbidden_dependencies: tuple[tuple[str, str], ...] = (),
-) -> AnalysisResult:
-    """Analyse one explicit import root without importing any target code.
+) -> AnalysisReport:
+    """Check all structural imports without executing project code.
 
-    The result is complete if and only if every candidate file received an
-    unambiguous module identity and was successfully read, decoded and parsed.
-    In concrete terms, this is exactly when no error diagnostic was produced.
-
-    ``view`` selects the grain of the condensation DAG only. Modules, import
-    facts and module-level dependencies are always reported at module grain,
-    so a package view narrows what is drawn and never what is recorded.
+    Tests are excluded; local and typing imports always count. Incomplete or
+    invalid source inventories raise AnalysisError rather than returning a
+    partial report. Evidence paths are relative to the caller's working
+    directory, and evidence positions are one-based.
     """
 
     root = Path(source_root)
     if not root.is_dir():
-        raise ValueError("source_root must be an existing directory")
-
-    project = Path(project_root) if project_root is not None else root
-    try:
-        relative_root = root.resolve().relative_to(project.resolve()).as_posix()
-    except ValueError as exc:
-        raise ValueError("source_root must be inside project_root") from exc
+        raise AnalysisError("source_root must be an existing directory")
     if any(
-        not name or any(not part.isidentifier() for part in name.split("."))
-        for name in expected_packages
+        len(rule) != 2 or any(not pattern or ":" in pattern for pattern in rule)
+        for rule in forbidden_dependencies
     ):
-        raise ValueError("expected package names must be dotted Python identifiers")
-    if any(len(rule) != 2 or not all(rule) for rule in forbidden_dependencies):
         raise ValueError(
-            "forbidden dependencies require nonempty source and target patterns"
+            "forbidden dependencies require two nonempty module-name globs"
         )
-    forbidden_dependencies = tuple(sorted(set(forbidden_dependencies)))
-    effective_excludes = tuple(
-        sorted(set(excludes) | (set() if policy.include_tests else set(TEST_EXCLUDES)))
-    )
-
+    rules = tuple(sorted(set(forbidden_dependencies)))
+    effective_excludes = tuple(sorted(set(excludes) | set(TEST_EXCLUDES)))
     discovery = discover_modules(root, excludes=effective_excludes)
-    collector = fact_source if fact_source is not None else AstImportFactSource()
-    collection = (
-        collector.collect(root, discovery.modules)
-        if fact_source is not None
-        else collector.collect_uncanonicalised(root, discovery.modules)
-    )
-    facts = canonicalise_fact_ids(collection.facts)
-    resolution = resolve_imports(
-        facts,
-        discovery.modules,
-        discovery.namespace_prefixes,
-    )
-    structural = filter_dependencies(
-        architecture_dependencies(resolution.dependencies), facts, policy
-    )
-    if view is View.PACKAGE:
-        dag = build_package_dag(discovery.modules, structural, package_depth)
-    else:
-        dag = build_dag(discovery.modules, structural)
-    scope_diagnostics = []
-    known_names = {module.id for module in discovery.modules} | set(
-        discovery.namespace_prefixes
-    )
-    for name in sorted(set(expected_packages) - known_names):
-        scope_diagnostics.append(
-            Diagnostic(
-                Severity.WARNING,
-                "expected_package_missing",
-                f"Expected package {name!r} is absent; verify source root and exclusions.",
-            )
+
+    # Include the import-root prefix in evidence for src-layout consumers.
+    prefix = Path(os.path.relpath(root.resolve(), Path.cwd().resolve()))
+
+    def located(diagnostic: Diagnostic) -> Diagnostic:
+        return replace(
+            diagnostic,
+            path=(prefix / diagnostic.path).as_posix() if diagnostic.path else None,
         )
-    # Detect the common src-layout mistake without treating every unknown
-    # external import as missing internal code. This is deliberately a warning.
+
+    _raise_errors(tuple(located(item) for item in discovery.diagnostics))
+    if not discovery.modules:
+        raise AnalysisError("[no_modules]: source root contains no Python modules")
+    collection = AstImportFactSource().collect(root, discovery.modules)
+    diagnostics = tuple(located(item) for item in collection.diagnostics)
+    _raise_errors(diagnostics)
+    facts = tuple(
+        replace(fact, path=(prefix / fact.path).as_posix()) for fact in collection.facts
+    )
+    modules = tuple(
+        replace(module, path=(prefix / module.path).as_posix())
+        for module in discovery.modules
+    )
+    resolution = resolve_imports(facts, modules, discovery.namespace_prefixes)
+    known_names = {module.id for module in modules} | set(discovery.namespace_prefixes)
     suspicious = sorted(
         {
             item.requested.split(".")[0]
@@ -133,101 +93,21 @@ def analyse(
         }
     )
     if suspicious:
-        scope_diagnostics.append(
-            Diagnostic(
-                Severity.WARNING,
-                "source_root_mismatch",
-                "Imports match packages below src/: "
-                + ", ".join(suspicious)
-                + "; use src as the source root and record its project root.",
-            )
+        raise AnalysisError(
+            "[source_root_mismatch]: Imports match packages below src/: "
+            + ", ".join(suspicious)
+            + "; use src as the source root."
         )
-    diagnostics = tuple(
-        sorted(
-            (*discovery.diagnostics, *collection.diagnostics, *scope_diagnostics),
-            key=_diagnostic_key,
-        )
-    )
-    complete = not any(item.severity is Severity.ERROR for item in diagnostics)
-    scope_valid = not scope_diagnostics
-    dynamic_count = sum(item.code == "dynamic_import_ignored" for item in diagnostics)
-    quality = calculate_quality(
-        discovery.modules,
-        structural,
-        complete=complete,
-        unresolved_import_count=len(resolution.unresolved_imports),
-        dynamic_import_warning_count=dynamic_count,
-    )
-    if complete and not scope_valid:
-        quality = replace(
-            quality,
-            score=None,
-            cycle_avoidance_score=None,
-            dependency_isolation_score=None,
-            unavailable_reason="invalid_scope",
-        )
-    missing = any(
-        item.reason is not UnresolvedReason.NAMESPACE_BASE_UNMODELLED
-        for item in resolution.unresolved_imports
-    )
-    uncertain = any(
-        not any(item.resolution_kind in DEFINITE_KINDS for item in edge.evidence)
-        for edge in structural
-    )
-    limitations = [
-        "Static analysis does not prove runtime initialization or the absence of dynamic imports.",
-        "The heuristic score is not a policy threshold; connected additions can dilute it.",
-    ]
-    if not expected_packages:
-        limitations.append(
-            "No expected package names were supplied; source-root validation is heuristic."
-        )
-    if missing:
-        limitations.append(
-            "Internal targets or relative imports could not be resolved."
-        )
-    if uncertain:
-        limitations.append(
-            "Some relationships depend on probable submodules or literal dynamic targets."
-        )
-    if dynamic_count:
-        limitations.append(
-            "Recognized dynamic calls are warnings; only supported literal targets are modelled."
-        )
-    python_version = (
-        f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    )
-    provenance = build_provenance(
-        relative_root,
-        python_version,
-        effective_excludes,
-        expected_packages,
-        policy,
-        forbidden_dependencies,
-        fact_source_name=f"{type(collector).__module__}.{type(collector).__qualname__}",
-    )
-
-    return AnalysisResult(
-        complete=complete,
-        python_version=python_version,
-        excludes=effective_excludes,
-        view=view,
-        package_depth=package_depth if view is View.PACKAGE else None,
-        namespace_prefixes=discovery.namespace_prefixes,
-        modules=discovery.modules,
-        import_facts=facts,
-        dependencies=resolution.dependencies,
-        external_imports=resolution.external_imports,
-        unresolved_imports=resolution.unresolved_imports,
-        dag=dag,
-        diagnostics=diagnostics,
-        quality=quality,
-        architecture_dependencies=structural,
-        provenance=provenance,
-        findings=build_findings(structural, facts, forbidden_dependencies),
-        limitations=tuple(limitations),
-        scope_valid=scope_valid,
-        dependency_resolution_complete=(
-            complete and scope_valid and not (missing or dynamic_count or uncertain)
+    structural = architecture_dependencies(resolution.dependencies)
+    return AnalysisReport(
+        module_count=len(modules),
+        dependency_count=len(structural),
+        findings=build_findings(
+            structural,
+            facts,
+            modules,
+            resolution.unresolved_imports,
+            diagnostics,
+            rules,
         ),
     )
