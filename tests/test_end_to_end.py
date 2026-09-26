@@ -16,9 +16,9 @@ def _write(root: Path, relative: str, source: str) -> None:
     path.write_text(source, encoding="utf-8")
 
 
-def _run(root: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+def _run(root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "pyarchgraph", str(root), *extra],
+        [sys.executable, "-m", "pyarchgraph", str(root)],
         capture_output=True,
         text=True,
         check=False,
@@ -45,8 +45,8 @@ def test_real_cli_reports_representative_concerns_without_execution_or_artifacts
     )
     _write(tmp_path, "tests/test_broken.py", "not ! valid python")
     original_files = set(tmp_path.rglob("*"))
-    first = _run(tmp_path, "--forbid", "pkg.a:pkg.b")
-    second = _run(tmp_path, "--forbid", "pkg.a:pkg.b")
+    first = _run(tmp_path)
+    second = _run(tmp_path)
     assert first.returncode == second.returncode == 1
     assert first.stderr == second.stderr == ""
     assert first.stdout == second.stdout
@@ -56,7 +56,6 @@ def test_real_cli_reports_representative_concerns_without_execution_or_artifacts
     assert sorted(f["kind"] for f in document["findings"]) == [
         "cycle",
         "cycle",
-        "forbidden_dependency",
         "unresolved_import",
     ]
     assert set(tmp_path.rglob("*")) == original_files

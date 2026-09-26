@@ -87,31 +87,10 @@ def test_exclusions_are_repeatable_and_applied_before_parsing(
     assert json.loads(capsys.readouterr().out)["module_count"] == 1
 
 
-def test_boundary_options_are_repeatable_and_combine_matching_rules(
-    tmp_path: Path, capsys
-) -> None:
-    _write(tmp_path, {"a.py": "import b\n", "b.py": ""})
-    assert main([str(tmp_path), "--forbid", "a:b", "--forbid", "*:b"]) == 1
-    (finding,) = json.loads(capsys.readouterr().out)["findings"]
-    assert finding["rules"] == [["*", "b"], ["a", "b"]]
-
-
-@pytest.mark.parametrize("rule", ["", "a", ":b", "a:", "a:b:c"])
-def test_invalid_boundary_rule_is_an_argument_error(
-    tmp_path: Path, capsys, rule: str
-) -> None:
-    _write(tmp_path, {"a.py": ""})
-    with pytest.raises(SystemExit) as error:
-        main([str(tmp_path), "--forbid", rule])
-    assert error.value.code == 2
-    output = capsys.readouterr()
-    assert output.out == ""
-    assert output.err
-
-
 @pytest.mark.parametrize(
     "flag",
     [
+        "--forbid",
         "--output-dir",
         "--output",
         "--json-only",
@@ -149,5 +128,6 @@ def test_help_describes_only_the_small_cli(capsys) -> None:
         main(["--help"])
     assert error.value.code == 0
     help_text = capsys.readouterr().out
-    assert "--exclude" in help_text and "--forbid" in help_text
+    assert "--exclude" in help_text
+    assert "--forbid" not in help_text
     assert "--baseline" not in help_text and "--output" not in help_text

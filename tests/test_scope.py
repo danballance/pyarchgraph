@@ -102,8 +102,9 @@ def test_invalid_exclusion_is_rejected(
         analyse(tmp_path, excludes=excludes)
 
 
-@pytest.mark.parametrize("rules", [(("a", ""),), (("", "b"),), (("a", "b:c"),)])
-def test_invalid_boundary_configuration_is_rejected(tmp_path: Path, rules) -> None:
+def test_removed_forbidden_dependencies_keyword_is_rejected(tmp_path: Path) -> None:
     _write(tmp_path, {"a.py": ""})
-    with pytest.raises(ValueError):
-        analyse(tmp_path, forbidden_dependencies=rules)
+    with pytest.raises(
+        TypeError, match="unexpected keyword argument 'forbidden_dependencies'"
+    ):
+        analyse(tmp_path, forbidden_dependencies=(("a", "b"),))

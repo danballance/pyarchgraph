@@ -9,20 +9,11 @@ from pyarchgraph.analysis import analyse
 from pyarchgraph.rendering import render_json
 
 
-def _rule(value: str) -> tuple[str, str]:
-    source, separator, target = value.partition(":")
-    if not separator or not source or not target or ":" in target:
-        raise argparse.ArgumentTypeError(
-            "--forbid requires SOURCE:TARGET with nonempty module-name globs"
-        )
-    return source, target
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="pyarchgraph",
         allow_abbrev=False,
-        description="Check Python import statements for cycles, forbidden dependencies and unresolved imports.",
+        description="Check Python import statements for cycles and unresolved imports.",
     )
     parser.add_argument(
         "source_root",
@@ -37,21 +28,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         metavar="GLOB",
         help="exclude a POSIX-relative path glob; repeatable; tests are always excluded",
     )
-    parser.add_argument(
-        "--forbid",
-        type=_rule,
-        action="append",
-        default=[],
-        metavar="SOURCE:TARGET",
-        help="forbid a direct dependency between two module-name globs; repeatable",
-    )
     args = parser.parse_args(argv)
     try:
-        report = analyse(
-            args.source_root,
-            excludes=tuple(args.exclude),
-            forbidden_dependencies=tuple(args.forbid),
-        )
+        report = analyse(args.source_root, excludes=tuple(args.exclude))
         output = render_json(report)
     except (OSError, ValueError) as error:
         print(f"pyarchgraph: {error}", file=sys.stderr)
