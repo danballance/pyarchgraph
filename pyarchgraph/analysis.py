@@ -39,7 +39,7 @@ def analyse(
     excludes: tuple[str, ...] = (),
     forbidden_dependencies: tuple[tuple[str, str], ...] = (),
 ) -> AnalysisReport:
-    """Check all structural imports without executing project code.
+    """Check explicit import statements without executing project code.
 
     Tests are excluded; local and typing imports always count. Incomplete or
     invalid source inventories raise AnalysisError rather than returning a
@@ -105,9 +105,7 @@ def analyse(
         findings=build_findings(
             structural,
             facts,
-            modules,
             resolution.unresolved_imports,
-            diagnostics,
             rules,
         ),
     )

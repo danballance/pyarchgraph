@@ -21,7 +21,7 @@ def _write(root: Path, files: dict[str, str]) -> None:
     [
         ({"a.py": "import b\n", "b.py": ""}, 0),
         ({"a.py": "import b\n", "b.py": "import a\n"}, 1),
-        ({"a.py": "__import__('external')\n"}, 1),
+        ({"a.py": "__import__('external')\n"}, 0),
     ],
 )
 def test_complete_analysis_prints_only_json_and_generates_no_files(

@@ -94,16 +94,14 @@ def resolve_imports(
             )
 
     for fact in facts:
-        if fact.syntax in (ImportSyntax.IMPORT, ImportSyntax.DYNAMIC_IMPORT):
+        if fact.syntax is ImportSyntax.IMPORT:
             assert fact.base_module is not None
             requested = fact.base_module
             if requested in module_ids:
                 add_dependency(
                     fact,
                     requested,
-                    ResolutionKind.DYNAMIC_LITERAL
-                    if fact.syntax == ImportSyntax.DYNAMIC_IMPORT
-                    else ResolutionKind.EXACT_MODULE,
+                    ResolutionKind.EXACT_MODULE,
                 )
             else:
                 classify_absent(fact, requested)
@@ -234,7 +232,7 @@ def architecture_dependencies(
     star and re-export imports without an indexed child retain the package
     relation, as does independent evidence supporting the same package edge.
 
-    Apply this selection before filtering evidence by certainty or scope, so
+    Apply this selection before filtering evidence by certainty, so
     removing a probable edge never revives its suppressed package-base edge.
     """
 

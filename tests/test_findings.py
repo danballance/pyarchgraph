@@ -139,6 +139,9 @@ def test_self_import_has_one_edge_witness(tmp_path: Path) -> None:
     [
         "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import b\n",
         "def late():\n    import b\n",
+        "class Container:\n    import b\n",
+        "if False:\n    import b\n",
+        "def late():\n    return\n    import b\n",
     ],
 )
 def test_local_and_typing_only_cycles_always_block(tmp_path: Path, source: str) -> None:
@@ -148,6 +151,25 @@ def test_local_and_typing_only_cycles_always_block(tmp_path: Path, source: str) 
     assert cycle.certainty == "definite"
     assert report.dependency_count == 2
     _assert_closed_witness(cycle)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import b\n",
+        "def late():\n    import b as backend\n",
+        "class Container:\n    import b\n",
+        "if False:\n    import b\n",
+    ],
+)
+def test_nested_explicit_imports_enforce_forbidden_dependencies(
+    tmp_path: Path, source: str
+) -> None:
+    _write(tmp_path, {"a.py": source, "b.py": ""})
+    (finding,) = analyse(tmp_path, forbidden_dependencies=(("a", "b"),)).findings
+    assert finding.kind == "forbidden_dependency"
+    assert finding.certainty == "definite"
+    assert [(edge.source, edge.target) for edge in finding.witness] == [("a", "b")]
 
 
 def test_duplicate_import_sites_preserved_without_counting_extra_edges(

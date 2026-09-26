@@ -71,7 +71,6 @@ def test_import_concerns_have_complete_source_evidence(
     (source / "a.py").write_text("from . import impossible\n__import__('external')\n")
     document = json.loads(render_json(analyse(source)))
     assert {f["kind"] for f in document["findings"]} == {
-        "dynamic_import",
         "unresolved_import",
     }
     for finding in document["findings"]:
@@ -88,5 +87,5 @@ def test_import_concerns_have_complete_source_evidence(
         (evidence,) = finding["evidence"]
         assert evidence["path"] == "src/a.py"
         assert evidence["source_segment"]
-        assert evidence["line"] in {1, 2}
+        assert evidence["line"] == 1
         assert evidence["column"] == 1

@@ -4,7 +4,6 @@ from pyarchgraph.model import (
     DependencyEdge,
     ExternalClassification,
     ImportFact,
-    ImportScope,
     ImportSyntax,
     ResolutionKind,
     SourceModule,
@@ -48,8 +47,6 @@ def _fact(
         as_name=None,
         bound_name=name or (base or "").partition(".")[0],
         relative_level=level,
-        scope=ImportScope.MODULE,
-        type_only=False,
     )
 
 
@@ -517,54 +514,6 @@ def test_architecture_suppresses_only_base_for_the_same_fact() -> None:
 
     assert architecture_dependencies(result.dependencies) == result.dependencies
 
-
-def test_dynamic_literal_resolves_with_uncertain_evidence_and_no_package_edge() -> None:
-    modules = (_module("app"), _module("pkg", package=True), _module("pkg.child"))
-    result = resolve_imports(
-        (
-            _fact(
-                "fact-dynamic",
-                "app",
-                syntax=ImportSyntax.DYNAMIC_IMPORT,
-                base="pkg.child",
-            ),
-            _fact("fact-static", "app", base="pkg.child"),
-        ),
-        modules,
-        (),
-    )
-
-    assert _dependency_map(result) == {
-        ("app", "pkg.child"): (
-            ("fact-dynamic", ResolutionKind.DYNAMIC_LITERAL),
-            ("fact-static", ResolutionKind.EXACT_MODULE),
-        ),
-    }
-    assert architecture_dependencies(result.dependencies) == result.dependencies
-
-
-def test_dynamic_literal_uses_normal_inventory_classification() -> None:
-    modules = (_module("app"), _module("pkg", package=True), _module("ns.child"))
-    result = resolve_imports(
-        tuple(
-            _fact(f"fact-{name}", "app", syntax=ImportSyntax.DYNAMIC_IMPORT, base=name)
-            for name in ("pkg.missing", "ns", "pathlib", "third_party")
-        ),
-        modules,
-        ("ns",),
-    )
-
-    assert result.dependencies == ()
-    assert [(item.requested, item.reason) for item in result.unresolved_imports] == [
-        ("ns", UnresolvedReason.NAMESPACE_BASE_UNMODELLED),
-        ("pkg.missing", UnresolvedReason.MISSING_INTERNAL_TARGET),
-    ]
-    assert [
-        (item.requested, item.classification) for item in result.external_imports
-    ] == [
-        ("pathlib", ExternalClassification.STDLIB),
-        ("third_party", ExternalClassification.EXTERNAL_UNKNOWN),
-    ]
 
 
 def test_missing_namespace_child_is_distinct_from_valid_namespace_base() -> None:
