@@ -7,7 +7,7 @@ from pathlib import Path
 from pyarchgraph.discovery import discover_modules
 from pyarchgraph.extraction import AstImportFactSource
 from pyarchgraph.findings import build_findings
-from pyarchgraph.model import AnalysisReport, Diagnostic, Severity
+from pyarchgraph.model import AnalysisReport, Diagnostic
 from pyarchgraph.resolution import architecture_dependencies, resolve_imports
 
 TEST_EXCLUDES = ("tests", "test_*.py", "*_test.py")
@@ -20,8 +20,6 @@ class AnalysisError(ValueError):
 def _raise_errors(diagnostics: tuple[Diagnostic, ...]) -> None:
     messages = []
     for diagnostic in diagnostics:
-        if diagnostic.severity is not Severity.ERROR:
-            continue
         location = diagnostic.path or ""
         if diagnostic.line is not None:
             location += f":{diagnostic.line}"

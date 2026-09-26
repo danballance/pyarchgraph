@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from pyarchgraph.discovery import (
-    _Candidate,
     _remove_ambiguous_groups,
     discover_modules,
 )
@@ -234,21 +233,21 @@ def test_result_order_is_independent_of_filesystem_walk_order(
 
 
 def _pairwise_conflict_reference(
-    candidates: list[_Candidate],
-) -> tuple[tuple[_Candidate, ...], tuple[Diagnostic, ...]]:
+    candidates: list[SourceModule],
+) -> tuple[tuple[SourceModule, ...], tuple[Diagnostic, ...]]:
     """Independent all-pairs reference for inventory and diagnostic semantics."""
 
-    ordered = sorted(candidates, key=lambda item: (item.module.id, item.module.path))
-    groups: dict[str, list[_Candidate]] = {}
+    ordered = sorted(candidates, key=lambda item: (item.id, item.path))
+    groups: dict[str, list[SourceModule]] = {}
     for candidate in ordered:
-        groups.setdefault(candidate.module.id, []).append(candidate)
-    excluded: set[_Candidate] = set()
+        groups.setdefault(candidate.id, []).append(candidate)
+    excluded: set[SourceModule] = set()
     duplicates = []
     prefixes = []
     for module_id, group in groups.items():
         if len(group) > 1:
             excluded.update(group)
-            paths = tuple(item.module.path for item in group)
+            paths = tuple(item.path for item in group)
             duplicates.append(
                 Diagnostic(
                     Severity.ERROR,
@@ -258,21 +257,21 @@ def _pairwise_conflict_reference(
                     path=paths[0],
                 )
             )
-        non_packages = [item for item in group if not item.module.is_package]
+        non_packages = [item for item in group if not item.is_package]
         descendants = [
-            item for item in ordered if item.module.id.startswith(module_id + ".")
+            item for item in ordered if item.id.startswith(module_id + ".")
         ]
         if non_packages and descendants:
             excluded.update(non_packages)
             excluded.update(descendants)
-            paths = sorted(item.module.path for item in descendants)
+            paths = sorted(item.path for item in descendants)
             prefixes.append(
                 Diagnostic(
                     Severity.ERROR,
                     "non_package_prefix_conflict",
                     f"Non-package module {module_id!r} cannot prefix descendant "
                     f"modules from: {', '.join(paths)}.",
-                    path=non_packages[0].module.path,
+                    path=non_packages[0].path,
                 )
             )
     return (
@@ -289,13 +288,11 @@ def test_prefix_index_matches_pairwise_reference_for_generated_inventories() -> 
         for index in range(rng.randrange(1, 35)):
             name = rng.choice(names)
             candidates.append(
-                _Candidate(
-                    SourceModule(
-                        name,
-                        f"source{index:02d}/{name.replace('.', '/')}.py",
-                        bool(rng.randrange(2)),
-                        name.rpartition(".")[0] or None,
-                    )
+                SourceModule(
+                    name,
+                    f"source{index:02d}/{name.replace('.', '/')}.py",
+                    bool(rng.randrange(2)),
+                    name.rpartition(".")[0] or None,
                 )
             )
         expected = _pairwise_conflict_reference(candidates)

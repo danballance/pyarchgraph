@@ -107,7 +107,9 @@ def _minimum_unique_prefix_lengths(digests: tuple[str, ...]) -> tuple[int, ...]:
     return tuple(lengths[digest] for digest in digests)
 
 
-def _assign_fact_ids(facts: Iterable[ImportFact]) -> tuple[ImportFact, ...]:
+def canonicalise_fact_ids(facts: Iterable[ImportFact]) -> tuple[ImportFact, ...]:
+    """Sort facts and assign stable, collision-safe content-derived IDs."""
+
     ordered = tuple(sorted(facts, key=_fact_sort_key))
     digests = tuple(_fact_digest(fact) for fact in ordered)
     if len(set(digests)) != len(digests):
@@ -119,12 +121,6 @@ def _assign_fact_ids(facts: Iterable[ImportFact]) -> tuple[ImportFact, ...]:
         replace(fact, id=f"fact-{digest[:length]}")
         for fact, digest, length in zip(ordered, digests, lengths, strict=True)
     )
-
-
-def canonicalise_fact_ids(facts: Iterable[ImportFact]) -> tuple[ImportFact, ...]:
-    """Sort facts and assign stable, collision-safe content-derived IDs."""
-
-    return _assign_fact_ids(facts)
 
 
 def _diagnostic_sort_key(diagnostic: Diagnostic) -> tuple[object, ...]:
@@ -188,15 +184,7 @@ class AstImportFactSource:
         source_root: Path,
         modules: tuple[SourceModule, ...],
     ) -> FactCollection:
-        collection = self.collect_uncanonicalised(source_root, modules)
-        return replace(collection, facts=canonicalise_fact_ids(collection.facts))
-
-    def collect_uncanonicalised(
-        self,
-        source_root: Path,
-        modules: tuple[SourceModule, ...],
-    ) -> FactCollection:
-        """Collect raw facts so orchestration can assign IDs exactly once."""
+        """Collect all explicit imports and assign their canonical IDs once."""
 
         facts: list[ImportFact] = []
         diagnostics: list[Diagnostic] = []
@@ -290,7 +278,7 @@ class AstImportFactSource:
             )
 
         return FactCollection(
-            facts=tuple(facts),
+            facts=canonicalise_fact_ids(facts),
             diagnostics=tuple(sorted(diagnostics, key=_diagnostic_sort_key)),
         )
 

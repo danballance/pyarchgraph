@@ -15,38 +15,36 @@ import json
 from statistics import median
 from time import perf_counter
 
-from pyarchgraph.discovery import _Candidate, _remove_ambiguous_groups
+from pyarchgraph.discovery import _remove_ambiguous_groups
 from pyarchgraph.model import SourceModule
 
 
-def _inventory(count: int, case: str) -> tuple[_Candidate, ...]:
+def _inventory(count: int, case: str) -> tuple[SourceModule, ...]:
     names = (
         f"module{index:06d}" if case == "flat" else f"namespace.group{index:06d}.leaf"
         for index in range(count)
     )
     return tuple(
-        _Candidate(
-            SourceModule(
-                name,
-                name.replace(".", "/") + ".py",
-                False,
-                name.rpartition(".")[0] or None,
-            )
+        SourceModule(
+            name,
+            name.replace(".", "/") + ".py",
+            False,
+            name.rpartition(".")[0] or None,
         )
         for name in names
     )
 
 
-def _quadratic_prefix_scan(candidates: tuple[_Candidate, ...]) -> int:
+def _quadratic_prefix_scan(candidates: tuple[SourceModule, ...]) -> int:
     """The previous prefix search, without the rest of discovery's work."""
 
     by_id: dict[str, list[int]] = {}
     for index, candidate in enumerate(candidates):
-        by_id.setdefault(candidate.module.id, []).append(index)
+        by_id.setdefault(candidate.id, []).append(index)
     conflicts = 0
     for prefix_id, prefix_indexes in sorted(by_id.items()):
         non_package_indexes = [
-            index for index in prefix_indexes if not candidates[index].module.is_package
+            index for index in prefix_indexes if not candidates[index].is_package
         ]
         if not non_package_indexes:
             continue

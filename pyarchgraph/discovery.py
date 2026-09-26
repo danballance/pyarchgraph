@@ -32,11 +32,6 @@ class DiscoveryResult:
     diagnostics: tuple[Diagnostic, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class _Candidate:
-    module: SourceModule
-
-
 def discover_modules(
     source_root: Path,
     *,
@@ -62,7 +57,7 @@ def discover_modules(
         source_root, exclude_patterns=exclude_patterns
     )
     diagnostics = list(scan_diagnostics)
-    candidates: list[_Candidate] = []
+    candidates: list[SourceModule] = []
 
     for relative_path in paths:
         candidate, diagnostic = _candidate_from_path(relative_path)
@@ -74,9 +69,7 @@ def discover_modules(
     retained, conflict_diagnostics = _remove_ambiguous_groups(candidates)
     diagnostics.extend(conflict_diagnostics)
 
-    modules = tuple(
-        sorted((candidate.module for candidate in retained), key=lambda item: item.id)
-    )
+    modules = tuple(sorted(retained, key=lambda item: item.id))
     module_ids = {module.id for module in modules}
     namespace_prefixes = tuple(
         sorted(
@@ -201,7 +194,7 @@ def _is_excluded(path: PurePosixPath, patterns: tuple[str, ...]) -> bool:
 
 def _candidate_from_path(
     relative_path: PurePosixPath,
-) -> tuple[_Candidate | None, Diagnostic | None]:
+) -> tuple[SourceModule | None, Diagnostic | None]:
     path = relative_path.as_posix()
     if relative_path == PurePosixPath("__init__.py"):
         return None, Diagnostic(
@@ -234,13 +227,11 @@ def _candidate_from_path(
     module_id = ".".join(module_parts)
     parent_package = ".".join(module_parts[:-1]) if len(module_parts) > 1 else None
     return (
-        _Candidate(
-            SourceModule(
-                id=module_id,
-                path=path,
-                is_package=is_package,
-                parent_package=parent_package,
-            )
+        SourceModule(
+            id=module_id,
+            path=path,
+            is_package=is_package,
+            parent_package=parent_package,
         ),
         None,
     )
@@ -251,42 +242,23 @@ def _valid_module_part(part: str) -> bool:
 
 
 def _remove_ambiguous_groups(
-    candidates: Iterable[_Candidate],
-) -> tuple[tuple[_Candidate, ...], tuple[Diagnostic, ...]]:
-    ordered = tuple(
-        sorted(candidates, key=lambda item: (item.module.id, item.module.path))
-    )
+    candidates: Iterable[SourceModule],
+) -> tuple[tuple[SourceModule, ...], tuple[Diagnostic, ...]]:
+    ordered = tuple(sorted(candidates, key=lambda item: (item.id, item.path)))
     if not ordered:
         return (), ()
-
-    parents = list(range(len(ordered)))
-
-    def find(index: int) -> int:
-        while parents[index] != index:
-            parents[index] = parents[parents[index]]
-            index = parents[index]
-        return index
-
-    def union(left: int, right: int) -> None:
-        left_root = find(left)
-        right_root = find(right)
-        if left_root != right_root:
-            parents[right_root] = left_root
 
     diagnostics: list[Diagnostic] = []
     conflicted: set[int] = set()
     by_id: defaultdict[str, list[int]] = defaultdict(list)
     for index, candidate in enumerate(ordered):
-        by_id[candidate.module.id].append(index)
+        by_id[candidate.id].append(index)
 
     for module_id, indexes in sorted(by_id.items()):
         if len(indexes) < 2:
             continue
-        first = indexes[0]
         conflicted.update(indexes)
-        for index in indexes[1:]:
-            union(first, index)
-        paths = tuple(ordered[index].module.path for index in indexes)
+        paths = tuple(ordered[index].path for index in indexes)
         diagnostics.append(
             Diagnostic(
                 severity=Severity.ERROR,
@@ -301,7 +273,7 @@ def _remove_ambiguous_groups(
 
     non_packages_by_id = {
         module_id: [
-            index for index in prefix_indexes if not ordered[index].module.is_package
+            index for index in prefix_indexes if not ordered[index].is_package
         ]
         for module_id, prefix_indexes in by_id.items()
     }
@@ -318,14 +290,11 @@ def _remove_ambiguous_groups(
         non_package_indexes = non_packages_by_id[prefix_id]
         affected = (*non_package_indexes, *descendant_indexes)
         conflicted.update(affected)
-        first = affected[0]
-        for index in affected[1:]:
-            union(first, index)
         descendant_paths = tuple(
-            sorted(ordered[index].module.path for index in descendant_indexes)
+            sorted(ordered[index].path for index in descendant_indexes)
         )
         prefix_paths = tuple(
-            sorted(ordered[index].module.path for index in non_package_indexes)
+            sorted(ordered[index].path for index in non_package_indexes)
         )
         diagnostics.append(
             Diagnostic(
@@ -339,14 +308,8 @@ def _remove_ambiguous_groups(
             )
         )
 
-    # Any candidates connected to a conflict are part of the same ambiguous
-    # identity group.  This matters when duplicate and prefix conflicts overlap.
-    conflicted_roots = {find(index) for index in conflicted}
-    excluded = {
-        index for index in range(len(ordered)) if find(index) in conflicted_roots
-    }
     retained = tuple(
-        candidate for index, candidate in enumerate(ordered) if index not in excluded
+        candidate for index, candidate in enumerate(ordered) if index not in conflicted
     )
     return retained, tuple(diagnostics)
 

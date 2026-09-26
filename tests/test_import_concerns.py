@@ -33,31 +33,26 @@ def test_local_and_typing_import_concerns_always_block(
     assert report.dependency_count == 1
 
 
-@pytest.mark.parametrize("guard", ["if TYPE_CHECKING:", "def later():", "class Container:"])
-@pytest.mark.parametrize(
-    "call",
-    [
+def test_dynamic_calls_produce_no_dependency_or_finding(tmp_path: Path) -> None:
+    calls = (
         "import_module('pkg.b')",
         "import_module('pkg.missing')",
         "import_module(target)",
         "__import__('pkg.b')",
         "__import__('pkg.missing')",
         "__import__('external')",
-    ],
-)
-def test_dynamic_calls_produce_no_dependency_or_finding(
-    tmp_path: Path, guard: str, call: str
-) -> None:
+    )
+    body = "".join(f"    {call}\n" for call in calls)
     package = tmp_path / "pkg"
     package.mkdir()
     (package / "__init__.py").write_text("")
     (package / "b.py").write_text("import pkg.a\n")
     (package / "a.py").write_text(
         "from typing import TYPE_CHECKING\nfrom importlib import import_module\n"
-        + guard
-        + "\n    "
-        + call
-        + "\n"
+        + "".join(
+            f"{guard}\n{body}"
+            for guard in ("if TYPE_CHECKING:", "def later():", "class Container:")
+        )
     )
     report = analyse(tmp_path, forbidden_dependencies=(("pkg.a", "pkg.b"),))
     assert report.findings == ()

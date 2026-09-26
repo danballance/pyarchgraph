@@ -15,7 +15,6 @@ from typing import Literal
 
 class Severity(str, Enum):
     ERROR = "error"
-    WARNING = "warning"
 
 
 class ImportSyntax(str, Enum):
@@ -75,7 +74,6 @@ class Diagnostic:
     path: str | None = None
     line: int | None = None
     column: int | None = None
-    source_segment: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

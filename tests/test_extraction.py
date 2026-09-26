@@ -14,19 +14,12 @@ from pyarchgraph.extraction import AstImportFactSource
 from pyarchgraph.model import ImportSyntax, Severity, SourceModule
 
 
-def _module(
-    module_id: str,
-    path: str,
-    *,
-    is_package: bool = False,
-) -> SourceModule:
+def _module(module_id: str, path: str) -> SourceModule:
     return SourceModule(
         id=module_id,
         path=path,
-        is_package=is_package,
-        parent_package=(
-            module_id if is_package else module_id.rpartition(".")[0] or None
-        ),
+        is_package=False,
+        parent_package=module_id.rpartition(".")[0] or None,
     )
 
 
@@ -373,16 +366,3 @@ def test_prefix_lengths_match_pairwise_reference_for_collisions_and_duplicates()
     assert extraction._minimum_unique_prefix_lengths(tuple(digests)) == tuple(expected)
     assert extraction._minimum_unique_prefix_lengths(()) == ()
     assert extraction._minimum_unique_prefix_lengths(("f" * 64,)) == (12,)
-
-
-def test_raw_collection_has_same_evidence_without_assigning_ids(tmp_path: Path) -> None:
-    (tmp_path / "mod.py").write_text("import a, b\n", encoding="utf-8")
-    collector = AstImportFactSource()
-    modules = (_module("mod", "mod.py"),)
-
-    raw = collector.collect_uncanonicalised(tmp_path, modules)
-    canonical = collector.collect(tmp_path, modules)
-
-    assert [fact.id for fact in raw.facts] == ["", ""]
-    assert extraction.canonicalise_fact_ids(raw.facts) == canonical.facts
-    assert raw.diagnostics == canonical.diagnostics

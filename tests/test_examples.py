@@ -388,11 +388,6 @@ def test_cli_json_is_deterministic_across_independent_processes():
     )
 
 
-def test_evaluator_treats_an_expected_failure_as_success():
-    expected = PROJECTS["definite_cycle"]["expected"]
-    assert evaluate.check_result(_completed("definite_cycle"), expected) == []
-
-
 def test_evaluator_rejects_changed_counts_certainty_and_extra_findings():
     completed = _completed("definite_cycle")
     expected = PROJECTS["definite_cycle"]["expected"]

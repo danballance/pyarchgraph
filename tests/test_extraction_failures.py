@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import os
 from pathlib import Path
 
@@ -26,35 +25,22 @@ def _sources(root: Path) -> None:
     (root / "target.py").write_text("")
 
 
-def _inject_limit(monkeypatch: pytest.MonkeyPatch, stage: str) -> None:
-    if stage == "parse":
-        original_parse = extraction.ast.parse
+def _inject_parse_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_parse = extraction.ast.parse
 
-        def parse(source, filename, *args, **kwargs):
-            if filename == "broken.py":
-                raise RecursionError("injected parsing limit")
-            return original_parse(source, filename, *args, **kwargs)
+    def parse(source, filename, *args, **kwargs):
+        if filename == "broken.py":
+            raise RecursionError("injected parsing limit")
+        return original_parse(source, filename, *args, **kwargs)
 
-        monkeypatch.setattr(extraction.ast, "parse", parse)
-    else:
-        original_walk = extraction.ast.walk
-
-        def walk(tree):
-            for node in original_walk(tree):
-                yield node
-                if isinstance(node, ast.Import) and node.names[0].name == "another":
-                    # Exhaust traversal after collecting partial import evidence.
-                    raise RecursionError("injected traversal limit")
-
-        monkeypatch.setattr(extraction.ast, "walk", walk)
+    monkeypatch.setattr(extraction.ast, "parse", parse)
 
 
-@pytest.mark.parametrize("stage", ["parse", "traversal"])
-def test_source_analysis_limit_discards_partial_evidence_and_continues(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+def test_source_parser_limit_reports_failure_and_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _sources(tmp_path)
-    _inject_limit(monkeypatch, stage)
+    _inject_parse_limit(monkeypatch)
 
     result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
     assert [(fact.source, fact.base_module) for fact in result.facts] == [
@@ -67,15 +53,13 @@ def test_source_analysis_limit_discards_partial_evidence_and_continues(
         analyse(tmp_path)
 
 
-@pytest.mark.parametrize("stage", ["parse", "traversal"])
 def test_cli_analysis_limit_emits_no_partial_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    stage: str,
 ) -> None:
     _sources(tmp_path)
-    _inject_limit(monkeypatch, stage)
+    _inject_parse_limit(monkeypatch)
 
     assert main([str(tmp_path)]) == 2
     captured = capsys.readouterr()

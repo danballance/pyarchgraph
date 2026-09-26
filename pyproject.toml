@@ -40,5 +40,4 @@ addopts = "-ra"
 testpaths = ["tests"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/fixtures/**/*.py" = ["F401"]
 "examples/projects/**/*.py" = ["ALL"]
