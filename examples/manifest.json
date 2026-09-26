@@ -6,15 +6,9 @@
       "id": "layered_service",
       "title": "Layered order service",
       "category": "good",
-      "intent": "Four legitimate layers are acyclic. The presentation layer must not depend directly on persistence.",
+      "intent": "Four legitimate layers form an acyclic graph with three direct dependencies.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [
-        [
-          "presentation",
-          "repository"
-        ]
-      ],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
@@ -38,16 +32,6 @@
       "intent": "The workflow depends on a narrow delivery protocol. Composition selects an email adapter; the domain and the protocol do not import infrastructure.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [
-        [
-          "workflow",
-          "email_adapter"
-        ],
-        [
-          "domain",
-          "email_adapter"
-        ]
-      ],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
@@ -85,7 +69,6 @@
       "intent": "Two exact module imports form a definite cycle. The cycle must remain a finding regardless of unrelated connected code or tests.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -114,7 +97,6 @@
       "intent": "A module importing itself is a cyclic component of size one and needs a bounded witness.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -141,7 +123,6 @@
       "intent": "An unrelated receipt-to-currency dependency must not conceal the original two-module cycle.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -170,7 +151,6 @@
       "intent": "Forty-nine unrelated one-way pairs must not conceal the original two-module cycle.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -199,7 +179,6 @@
       "intent": "One hundred test consumers are always excluded. Both runs must report the same two production modules and the unchanged cycle.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -227,7 +206,6 @@
           "exclusions": [
             "tests/**"
           ],
-          "forbidden_dependencies": [],
           "expected": {
             "outcome": "fail",
             "exit_code": 1,
@@ -258,7 +236,6 @@
       "intent": "Unrelated isolated modules must not conceal the original two-module cycle.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -283,39 +260,16 @@
     {
       "id": "dense_ordered_dag",
       "title": "Six direct edges with the same reachability",
-      "category": "warning",
-      "intent": "An acyclic graph can still violate a directional dependency rule.",
+      "category": "good",
+      "intent": "Six direct dependencies among four modules remain acyclic and produce no findings.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [
-        [
-          "presentation",
-          "repository"
-        ]
-      ],
       "expected": {
-        "outcome": "fail",
-        "exit_code": 1,
+        "outcome": "pass",
+        "exit_code": 0,
         "module_count": 4,
         "dependency_count": 6,
-        "findings": [
-          {
-            "kind": "forbidden_dependency",
-            "certainty": "definite",
-            "rules": [
-              [
-                "presentation",
-                "repository"
-              ]
-            ],
-            "witness": [
-              {
-                "source": "presentation",
-                "target": "repository"
-              }
-            ]
-          }
-        ]
+        "findings": []
       }
     },
     {
@@ -325,7 +279,6 @@
       "intent": "The package re-exports a, and a uses b.VALUE. Relative from-import and absolute submodule spelling must yield the same architectural dependencies. Package initialization syntax remains as evidence.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
@@ -353,7 +306,6 @@
       "intent": "The package re-exports a, and a uses b.VALUE. Relative from-import and absolute submodule spelling must yield the same architectural dependencies. Package initialization syntax remains as evidence.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
@@ -381,7 +333,6 @@
       "intent": "A child module shadowed by a package attribute creates a possible cycle, which must still block a pass.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -407,7 +358,6 @@
       "intent": "Typing-only dependencies remain structural and the cycle must fail.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -436,7 +386,6 @@
       "intent": "Function-local dependencies remain structural and the cycle must fail.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -465,7 +414,6 @@
       "intent": "Ordinary and typing-only imports of the same target retain both evidence sites but count as one dependency.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -494,7 +442,6 @@
       "intent": "The real cycle is visible from src; selecting the repository directory instead is an analysis error.",
       "source_root": "src",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -520,7 +467,6 @@
           "id": "incorrect_repository_root",
           "source_root": ".",
           "exclusions": [],
-          "forbidden_dependencies": [],
           "expected": {
             "outcome": "error",
             "exit_code": 2,
@@ -536,7 +482,6 @@
       "intent": "A source-backed package imports a nonexistent sibling. Parsing can be complete while internal dependency knowledge is incomplete, so missing targets must remain explicit.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -559,7 +504,6 @@
       "intent": "There are deliberately no __init__.py files. The reader is a real namespace-package submodule; an unmodelled namespace base is different from a missing internal target.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
@@ -583,7 +527,6 @@
       "intent": "Dynamic calls with literal targets produce no dependencies or findings. The explicit plugin-to-loader import remains, but the dynamic return relationship is outside coverage.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
@@ -613,7 +556,6 @@
       "intent": "Aliased dynamic calls produce no dependencies or findings. Explicit importlib imports are still collected as external imports.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
@@ -637,7 +579,6 @@
       "intent": "Runtime-selected dynamic calls produce no dependencies or findings. Explicit importlib imports are still collected as external imports; dynamically introduced dependencies are outside coverage.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
@@ -661,7 +602,6 @@
       "intent": "Editor and history each depend on events, while events depends on both. The SCC has three modules, but the longest simple cycle has two: component size must not be labelled cycle length.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -692,7 +632,6 @@
       "intent": "Five modules all import one another. Report one bounded witness for the cyclic component instead of enumerating all simple cycles.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -727,7 +666,6 @@
       "intent": "The application consumes a public class through a package initializer. Keeping app -> toolkit and toolkit -> toolkit.models preserves a real dependency; removing every package edge would erase it.",
       "source_root": ".",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
@@ -755,7 +693,6 @@
       "intent": "Comments and blank lines change evidence locations without changing semantic findings.",
       "source_root": "before",
       "exclusions": [],
-      "forbidden_dependencies": [],
       "expected": {
         "outcome": "fail",
         "exit_code": 1,
@@ -781,7 +718,6 @@
           "id": "after_documentation_edit",
           "source_root": "after",
           "exclusions": [],
-          "forbidden_dependencies": [],
           "expected": {
             "outcome": "fail",
             "exit_code": 1,

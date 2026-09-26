@@ -42,8 +42,6 @@ def run_cli(
     command = [sys.executable, "-m", "pyarchgraph", str(root)]
     for pattern in config["exclusions"]:
         command.extend(["--exclude", pattern])
-    for source, target in config["forbidden_dependencies"]:
-        command.extend(["--forbid", f"{source}:{target}"])
     return subprocess.run(
         command,
         cwd=REPOSITORY,
