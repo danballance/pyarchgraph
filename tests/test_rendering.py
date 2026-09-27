@@ -1,6 +1,8 @@
 import json
 
-from pyarchgraph import analyse, render_json
+from pyarchgraph.adapters.rendering import JsonReportRenderer
+from pyarchgraph.composition import ApplicationFactory
+from pyarchgraph.domain.model import AnalysisOptions
 
 
 def test_json_contract_has_coverage_three_views_and_stable_source_references(
@@ -9,7 +11,11 @@ def test_json_contract_has_coverage_three_views_and_stable_source_references(
     monkeypatch.chdir(tmp_path)
     (tmp_path / "a.py").write_text("import b\n")
     (tmp_path / "b.py").write_text("import a\n")
-    rendered = render_json(analyse((tmp_path,)))
+    rendered = JsonReportRenderer().render(
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     document = json.loads(rendered)
     assert set(document) == {
         "schema_version",
@@ -19,26 +25,31 @@ def test_json_contract_has_coverage_three_views_and_stable_source_references(
         "coverage",
         "views",
     }
-    assert document["schema_version"] == "0.6"
+    assert document["schema_version"] == "0.7"
     assert document["status"] == "complete" and document["gate"] == "structural"
-    assert set(document["views"]) == {"structural", "non_typing", "module_body"}
+    assert set(document["views"]) == {"structural", "non-typing", "module-body"}
     sources = {item["id"]: item for item in document["sources"]}
     assert set(sources) == {"source:a.py", "source:b.py"}
     assert all(item["analysis_status"] == "analyzed" for item in sources.values())
     for view in document["views"].values():
         assert set(view) == {
+            "nodes",
+            "enabled_check_ids",
             "dependency_count",
-            "cyclic_source_count",
+            "cyclic_node_count",
             "cyclic_dependency_count",
             "findings",
         }
         assert (
             view["dependency_count"]
-            == view["cyclic_source_count"]
+            == view["cyclic_node_count"]
             == view["cyclic_dependency_count"]
             == 2
         )
-        (cycle,) = view["findings"]
+        (registered,) = view["findings"]
+        assert set(registered) == {"check_id", "severity", "finding"}
+        assert registered["check_id"] == "cycles" and registered["severity"] == "error"
+        cycle = registered["finding"]
         assert set(cycle) == {
             "kind",
             "certainty",
@@ -63,6 +74,9 @@ def test_json_contract_has_coverage_three_views_and_stable_source_references(
                 "source_segment",
                 "resolution_kind",
                 "context",
+                "source",
+                "target",
+                "fact_id",
             }
             assert evidence["path"] == sources[edge["source"]]["path"]
             assert evidence["line"] == evidence["column"] == 1
@@ -85,8 +99,16 @@ def test_import_concerns_keep_source_root_prefix_and_evidence(tmp_path, monkeypa
     monkeypatch.chdir(tmp_path)
     (tmp_path / "src").mkdir()
     (tmp_path / "src/a.py").write_text("from . import impossible\n")
-    document = json.loads(render_json(analyse((tmp_path / "src",))))
-    (finding,) = document["views"]["structural"]["findings"]
+    document = json.loads(
+        JsonReportRenderer().render(
+            ApplicationFactory()
+            .create_analyzer()
+            .analyse((tmp_path / "src",), options=AnalysisOptions())
+        )
+    )
+    (registered,) = document["views"]["structural"]["findings"]
+    finding = registered["finding"]
+    assert finding["node"] == finding["source"]
     assert finding["source"] == "source:src/a.py"
     assert finding["kind"] == "unresolved_import"
     (evidence,) = finding["evidence"]

@@ -30,28 +30,28 @@ reported on stderr instead.
 
 | Exit | Meaning |
 | --- | --- |
-| `0` | Complete within declared scope and accepted boundaries; selected view has no findings |
-| `1` | Complete within that scope; selected view has findings |
-| `2` | Incomplete analysis, or invalid invocation/configuration |
+| `0` | Complete within declared scope and accepted boundaries; selected view has no error findings |
+| `1` | Complete within that scope; selected view has error findings |
+| `2` | Incomplete analysis, invalid invocation/configuration, or extension failure |
 
 Source-analysis errors produce **partial JSON**, including recovered findings,
 coverage diagnostics and sources that could not be parsed. An incomplete scan
 never passes, even if the recovered graph has no cycles.
 
-Every report contains three views:
+The default composition reports three views:
 
 | CLI gate | JSON view | Import sites included |
 | --- | --- | --- |
 | `structural` (default) | `structural` | All explicit import statements |
-| `non-typing` | `non_typing` | Excludes recognized `TYPE_CHECKING` bodies |
-| `module-body` | `module_body` | Also excludes sites inside any function/method; top-level class bodies remain |
+| `non-typing` | `non-typing` | Excludes recognized `TYPE_CHECKING` bodies |
+| `module-body` | `module-body` | Also excludes sites inside any function/method; top-level class bodies remain |
 
 ```console
 uv run pyarchgraph src --gate non-typing
 uv run pyarchgraph src --gate module-body --details component-edges
 ```
 
-Only the selected gate's findings determine exit `1`; other views remain
+Only the selected gate's error findings determine exit `1`; other views remain
 informational. Coverage remains independent of the gate. For example, selecting
 `module-body` cannot conceal an unacknowledged stub target mentioned only inside
 a typing guard.
@@ -120,15 +120,17 @@ as analyzed, create graph edges through it, suppress real source dependencies,
 or excuse parse failures or competing bindings. Unused acknowledgements produce
 warnings. Missing internal targets remain findings, distinct from coverage errors.
 
-## JSON schema 0.6
+## JSON schema 0.7
 
 The envelope contains `schema_version`, `status`, `gate`, `sources`, `coverage`
-and `views`. Source IDs are `source:` followed by a working-directory-relative
-POSIX path. Graph endpoints refer to these IDs; `sources` provides their paths,
-import names, binding status and analysis status.
+and `views`. Source IDs are `source:` followed by a base-directory-relative
+POSIX path. View nodes reference source memberships; `sources` provides paths,
+import names, binding status and analysis status. With the built-in views each
+node corresponds to one source.
 
-Each view contains dependency, cyclic-source and cyclic-dependency counts and
-findings. A cycle finding represents one cyclic strongly connected component,
+Each view contains nodes, enabled check IDs, dependency, cyclic-node and
+cyclic-dependency counts, and registered finding envelopes. A cycle finding
+represents one cyclic strongly connected component,
 including a self-loop, with its members, definite members and one deterministic
 witness. `--details component-edges` additionally includes every internal
 component dependency. The command never enumerates all elementary cycles.
@@ -149,13 +151,14 @@ build execution and initialization-order proof remain outside scope.
 
 ```python
 from pathlib import Path
-from pyarchgraph import AnalysisOptions, analyse, render_json
+from pyarchgraph import AnalysisOptions, ApplicationFactory, JsonReportRenderer
 
-report = analyse(
+analyzer = ApplicationFactory().create_analyzer()
+report = analyzer.analyse(
     (Path("."), Path("src")),
     options=AnalysisOptions(excludes=("examples",), gate="structural"),
 )
-print(render_json(report), end="")
+print(JsonReportRenderer().render(report), end="")
 print(report.status, report.exit_code)
 ```
 
@@ -165,11 +168,43 @@ raise `AnalysisError`. Source-analysis failures return an incomplete report.
 Reports and option/domain objects are frozen dataclasses. The report's
 `selected_view` and `exit_code` properties are conveniences, not serialized fields.
 
-Version 0.6 replaces the former single-root Python API and JSON schema 0.5.
-Checksmith's matching adapter must be upgraded together; it validates schema 0.6
-strictly and maps partial reports to its error status. There is no legacy parser.
+Version 0.7 replaces the functional Python API and JSON schema 0.6. Views are an
+immutable mapping keyed by exact IDs, such as `report.views["module-body"]`.
+Each view contains projected nodes, enabled check IDs, dependency counts,
+`cyclic_node_count`, and findings wrapped as `check_id`, `severity`, and `finding`.
+Only error findings in the selected view return exit 1; incomplete coverage
+always returns exit 2. `base_dir` resolves relative roots and controls report paths.
+
+[Release and migration notes](docs/release-0.7.0.md) describe the breaking changes.
+Checksmith's strict schema 0.6 adapter needs a separate migration before the
+coordinated release.
+
+## Extending analysis
+
+Runtime code follows ports and adapters: immutable models, resolution policies,
+and graph strategy contracts live in `domain`; orchestration and immutable
+registries live in `application`; filesystem, AST, TOML, NetworkX, CLI, and JSON
+implementations live in `adapters`. `ApplicationFactory` wires those parts.
+
+Supply Python objects implementing `GraphViewStrategy.transform(snapshot)` or
+`CheckStrategy.evaluate(context)` to the factory registry. Both use structural
+protocols, so subclassing and a dependency injection framework are unnecessary.
+Return the public frozen graph and finding dataclasses with immutable tuples;
+extra-field subclasses are rejected by output validation.
+Each view receives the same normalized immutable snapshot. View validation
+allows filtering, renaming, and aggregation while requiring original evidence
+and disjoint source memberships. Aggregated cycles describe projected nodes.
+
+See the [external strategy example](examples/custom_strategies.py)
+for a package grouping view and advisory check. Exact per-view check selection,
+including an empty tuple, works for built-in and custom views. Coverage remains
+mandatory. Extension failures raise `ExtensionError`; the CLI prints the error
+and returns 2 without a report.
 
 ## Verification
+
+The [0.7 verification record](docs/verification-0.7.md) includes the supported
+Python matrix, packaging checks, corpus results, and reproducible benchmarks.
 
 ```console
 uv run pytest -q

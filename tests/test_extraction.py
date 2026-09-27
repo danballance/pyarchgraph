@@ -8,10 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from pyarchgraph import analyse, extraction
-from pyarchgraph.discovery import discover_modules
-from pyarchgraph.extraction import AstImportFactSource
-from pyarchgraph.model import ImportSyntax, Severity, SourceModule
+from pyarchgraph.adapters.discovery import FileSystemSourceDiscovery
+from pyarchgraph.composition import ApplicationFactory
+from pyarchgraph.domain.canonicalization import FactCanonicalizer
+from pyarchgraph.domain.model import (
+    AnalysisOptions,
+    ImportSyntax,
+    Severity,
+    SourceModule,
+)
 
 
 def _module(module_id: str, path: str) -> SourceModule:
@@ -33,8 +38,10 @@ from .. import *
     path.parent.mkdir()
     path.write_text(source, encoding="utf-8")
 
-    result = AstImportFactSource().collect(
-        tmp_path, (_module("pkg.mod", "pkg/mod.py"),)
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, (_module("pkg.mod", "pkg/mod.py"),))
     )
 
     assert result.diagnostics == ()
@@ -78,7 +85,11 @@ def test_unicode_fact_columns_count_characters(tmp_path: Path) -> None:
         "é = 1; from 插件 import (\n    value as renamed)\n"
     )
     (tmp_path / "mod.py").write_text(source, encoding="utf-8")
-    result = AstImportFactSource().collect(tmp_path, (_module("mod", "mod.py"),))
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, (_module("mod", "mod.py"),))
+    )
     lines = source.split("\n")
 
     assert result.diagnostics == ()
@@ -101,8 +112,13 @@ def test_unicode_columns_are_one_based_in_public_findings(tmp_path: Path) -> Non
         encoding="utf-8",
     )
     (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
-    report = analyse((tmp_path,))
-    (cycle,) = report.views.structural.findings
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
+    (cycle,) = report.views["structural"].findings
+    cycle = cycle.finding
     assert cycle.kind == "cycle"
     source_id = next(item.id for item in report.sources if item.import_name == "a")
     edge = next(edge for edge in cycle.witness if edge.source == source_id)
@@ -116,7 +132,11 @@ def test_unicode_syntax_error_columns_are_not_converted_twice(tmp_path: Path) ->
     (tmp_path / "mod.py").write_text(source, encoding="utf-8")
     with pytest.raises(SyntaxError) as caught:
         ast.parse(source)
-    result = AstImportFactSource().collect(tmp_path, (_module("mod", "mod.py"),))
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, (_module("mod", "mod.py"),))
+    )
 
     (diagnostic,) = result.diagnostics
     assert diagnostic.code == "source_syntax_error"
@@ -157,7 +177,11 @@ def test_explicit_imports_are_collected_in_every_statement_context(
     )
     (tmp_path / "mod.py").write_text(source, encoding="utf-8")
 
-    result = AstImportFactSource().collect(tmp_path, (_module("pkg.mod", "mod.py"),))
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, (_module("pkg.mod", "mod.py"),))
+    )
 
     assert result.diagnostics == ()
     assert len(result.facts) == 4
@@ -195,7 +219,11 @@ def test_dynamic_import_calls_and_aliases_have_no_evidence_or_findings(
     )
     (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
 
-    result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, FileSystemSourceDiscovery().discover(tmp_path).modules)
+    )
 
     assert result.diagnostics == ()
     assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
@@ -204,9 +232,13 @@ def test_dynamic_import_calls_and_aliases_have_no_evidence_or_findings(
         ("a", "importlib"),
         ("b", "a"),
     ]
-    report = analyse((tmp_path,))
-    assert report.views.structural.dependency_count == 1
-    assert report.views.structural.findings == ()
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
+    assert report.views["structural"].dependency_count == 1
+    assert report.views["structural"].findings == ()
 
 
 @pytest.mark.parametrize("postponed", [False, True])
@@ -231,13 +263,24 @@ if TYPE_CHECKING:
     (tmp_path / "a.py").write_text(source, encoding="utf-8")
     (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
 
-    result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, FileSystemSourceDiscovery().discover(tmp_path).modules)
+    )
 
     assert result.diagnostics == ()
     assert [fact.base_module for fact in result.facts] == (
         (["__future__"] if postponed else []) + ["importlib", "typing", "a"]
     )
-    assert analyse((tmp_path,)).views.structural.findings == ()
+    assert (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+        .views["structural"]
+        .findings
+        == ()
+    )
 
 
 def test_read_decode_and_parse_failures_are_stable_and_do_not_stop_collection(
@@ -256,7 +299,7 @@ def test_read_decode_and_parse_failures_are_stable_and_do_not_stop_collection(
         _module("good", "good.py"),
         _module("bad_decode", "bad_decode.py"),
     )
-    result = AstImportFactSource().collect(tmp_path, modules)
+    result = ApplicationFactory().create_fact_source().collect(tmp_path, modules)
 
     assert [(item.code, item.path) for item in result.diagnostics] == [
         ("source_decode_error", "bad_decode.py"),
@@ -275,7 +318,7 @@ def test_fact_ids_and_order_are_deterministic(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("import y\n", encoding="utf-8")
     a = _module("a", "a.py")
     b = _module("b", "b.py")
-    collector = AstImportFactSource()
+    collector = ApplicationFactory().create_fact_source()
 
     forward = collector.collect(tmp_path, (a, b))
     reverse = collector.collect(tmp_path, (b, a))
@@ -331,12 +374,16 @@ def test_fact_id_prefix_collisions_are_extended(
         "c": "fedcba9876542" + "2" * 51,
     }
     monkeypatch.setattr(
-        extraction,
+        FactCanonicalizer,
         "_fact_digest",
-        lambda fact: digests[fact.base_module or ""],
+        lambda self, fact: digests[fact.base_module or ""],
     )
 
-    result = AstImportFactSource().collect(tmp_path, (_module("mod", "mod.py"),))
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, (_module("mod", "mod.py"),))
+    )
 
     assert [fact.id for fact in result.facts] == [
         "fact-123456789abc0",
@@ -349,10 +396,12 @@ def test_full_fact_digest_collision_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "mod.py").write_text("import a, b\n", encoding="utf-8")
-    monkeypatch.setattr(extraction, "_fact_digest", lambda fact: "0" * 64)
+    monkeypatch.setattr(FactCanonicalizer, "_fact_digest", lambda self, fact: "0" * 64)
 
     with pytest.raises(ValueError, match="unique full SHA-256"):
-        AstImportFactSource().collect(tmp_path, (_module("mod", "mod.py"),))
+        ApplicationFactory().create_fact_source().collect(
+            tmp_path, (_module("mod", "mod.py"),)
+        )
 
 
 def test_prefix_lengths_match_pairwise_reference_for_collisions_and_duplicates() -> (
@@ -373,6 +422,8 @@ def test_prefix_lengths_match_pairwise_reference_for_collisions_and_duplicates()
             length += 1
         expected.append(length)
 
-    assert extraction._minimum_unique_prefix_lengths(tuple(digests)) == tuple(expected)
-    assert extraction._minimum_unique_prefix_lengths(()) == ()
-    assert extraction._minimum_unique_prefix_lengths(("f" * 64,)) == (12,)
+    assert FactCanonicalizer()._minimum_unique_prefix_lengths(tuple(digests)) == tuple(
+        expected
+    )
+    assert FactCanonicalizer()._minimum_unique_prefix_lengths(()) == ()
+    assert FactCanonicalizer()._minimum_unique_prefix_lengths(("f" * 64,)) == (12,)

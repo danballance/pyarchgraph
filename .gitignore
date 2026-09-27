@@ -5,7 +5,8 @@ __pycache__/
 build/
 dist/
 
-benchmarks/
+benchmarks/*
+!benchmarks/*.py
 
 docs/validation/0.6/
 

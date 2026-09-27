@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pyarchgraph.model import (
+from pyarchgraph.domain.model import (
     DependencyEdge,
     ExternalClassification,
     ImportFact,
@@ -9,7 +9,10 @@ from pyarchgraph.model import (
     SourceModule,
     UnresolvedReason,
 )
-from pyarchgraph.resolution import architecture_dependencies, resolve_imports
+from pyarchgraph.domain.resolution import (
+    ArchitectureDependencyPolicy,
+    StaticImportResolver,
+)
 
 
 def _module(module_id: str, *, package: bool = False) -> SourceModule:
@@ -78,7 +81,7 @@ def test_import_resolution_is_exact_and_aggregates_all_evidence() -> None:
         _fact("fact-json", "app", base="json"),
     )
 
-    result = resolve_imports(facts, modules, ())
+    result = StaticImportResolver().resolve(facts, modules, ())
 
     assert _dependency_map(result) == {
         ("app", "app"): (("fact-self", ResolutionKind.EXACT_MODULE),),
@@ -122,7 +125,7 @@ def test_from_import_keeps_exact_base_and_probable_leaf_separate() -> None:
         ),
     )
 
-    result = resolve_imports(facts, modules, ())
+    result = StaticImportResolver().resolve(facts, modules, ())
 
     assert _dependency_map(result) == {
         ("app", "p"): (
@@ -153,7 +156,7 @@ def test_from_import_suppresses_only_the_trivial_base_self_edge() -> None:
         name="x",
     )
 
-    result = resolve_imports((package_fact, leaf_fact), modules, ())
+    result = StaticImportResolver().resolve((package_fact, leaf_fact), modules, ())
 
     assert _dependency_map(result) == {
         ("p", "p.x"): (("fact-package", ResolutionKind.PROBABLE_SUBMODULE),),
@@ -176,7 +179,9 @@ def test_namespace_bases_are_unmodelled_but_indexed_leaf_is_probable() -> None:
         _fact("fact-missing", "app", base="ns.missing"),
     )
 
-    result = resolve_imports(facts, modules, ("ns",), owned_prefixes=("ns",))
+    result = StaticImportResolver().resolve(
+        facts, modules, ("ns",), owned_prefixes=("ns",)
+    )
 
     assert _dependency_map(result) == {
         ("app", "ns.leaf"): (("fact-from-ns", ResolutionKind.PROBABLE_SUBMODULE),)
@@ -251,7 +256,7 @@ def test_relative_imports_use_package_context_and_report_escapes() -> None:
         ),
     )
 
-    result = resolve_imports(facts, modules, ("pkg.sub",))
+    result = StaticImportResolver().resolve(facts, modules, ("pkg.sub",))
 
     assert _dependency_map(result) == {
         ("pkg.mod", "pkg.service"): (("fact-sibling", ResolutionKind.EXACT_BASE),),
@@ -284,7 +289,7 @@ def test_absent_import_classification_has_declared_precedence() -> None:
         _fact("fact-unknown-a", "app", base="some_unknown_distribution"),
     )
 
-    result = resolve_imports(facts, modules, ("os",))
+    result = StaticImportResolver().resolve(facts, modules, ("os",))
 
     assert ("app", "sys") in _dependency_map(result)
     assert [
@@ -327,7 +332,7 @@ def test_external_from_import_classifies_only_the_definite_base() -> None:
         ),
     )
 
-    result = resolve_imports(facts, modules, ())
+    result = StaticImportResolver().resolve(facts, modules, ())
 
     assert result.dependencies == ()
     assert [
@@ -353,7 +358,7 @@ def test_architecture_submodule_spellings_have_the_same_relationships() -> None:
         name="a",
         level=1,
     )
-    relative = resolve_imports(
+    relative = StaticImportResolver().resolve(
         (
             package_import,
             _fact(
@@ -368,14 +373,14 @@ def test_architecture_submodule_spellings_have_the_same_relationships() -> None:
         modules,
         (),
     )
-    direct = resolve_imports(
+    direct = StaticImportResolver().resolve(
         (package_import, _fact("fact-direct", "pkg.a", base="pkg.b")),
         modules,
         (),
     )
 
-    relative_architecture = architecture_dependencies(relative.dependencies)
-    direct_architecture = architecture_dependencies(direct.dependencies)
+    relative_architecture = ArchitectureDependencyPolicy().select(relative.dependencies)
+    direct_architecture = ArchitectureDependencyPolicy().select(direct.dependencies)
 
     assert set(_evidence_map(relative_architecture)) == {
         ("pkg", "pkg.a"),
@@ -396,7 +401,7 @@ def test_architecture_submodule_spellings_have_the_same_relationships() -> None:
 
 def test_architecture_keeps_independent_package_evidence() -> None:
     modules = (_module("app"), _module("pkg", package=True), _module("pkg.child"))
-    result = resolve_imports(
+    result = StaticImportResolver().resolve(
         (
             _fact(
                 "fact-child",
@@ -425,7 +430,9 @@ def test_architecture_keeps_independent_package_evidence() -> None:
         (),
     )
 
-    assert _evidence_map(architecture_dependencies(result.dependencies)) == {
+    assert _evidence_map(
+        ArchitectureDependencyPolicy().select(result.dependencies)
+    ) == {
         ("app", "pkg"): (
             ("fact-attribute", ResolutionKind.EXACT_BASE),
             ("fact-package", ResolutionKind.EXACT_MODULE),
@@ -439,7 +446,7 @@ def test_architecture_reexport_preserves_package_and_implementation_dependencies
     None
 ):
     modules = (_module("app"), _module("pkg", package=True), _module("pkg.impl"))
-    result = resolve_imports(
+    result = StaticImportResolver().resolve(
         (
             _fact(
                 "fact-consumer",
@@ -461,7 +468,9 @@ def test_architecture_reexport_preserves_package_and_implementation_dependencies
         (),
     )
 
-    assert _evidence_map(architecture_dependencies(result.dependencies)) == {
+    assert _evidence_map(
+        ArchitectureDependencyPolicy().select(result.dependencies)
+    ) == {
         ("app", "pkg"): (("fact-consumer", ResolutionKind.EXACT_BASE),),
         ("pkg", "pkg.impl"): (("fact-reexport", ResolutionKind.EXACT_BASE),),
     }
@@ -471,7 +480,7 @@ def test_architecture_possible_attribute_shadow_never_becomes_definite_child() -
     # Inventories do not describe assignments such as ``pkg.__init__: b = 42``.
     # A file with the same name can only be a candidate, even after selection.
     modules = (_module("pkg", package=True), _module("pkg.a"), _module("pkg.b"))
-    result = resolve_imports(
+    result = StaticImportResolver().resolve(
         (
             _fact(
                 "fact-shadowable",
@@ -485,7 +494,7 @@ def test_architecture_possible_attribute_shadow_never_becomes_definite_child() -
         (),
     )
 
-    selected = architecture_dependencies(result.dependencies)
+    selected = ArchitectureDependencyPolicy().select(result.dependencies)
 
     assert _evidence_map(selected) == {
         ("pkg.a", "pkg.b"): (("fact-shadowable", ResolutionKind.PROBABLE_SUBMODULE),),
@@ -493,12 +502,12 @@ def test_architecture_possible_attribute_shadow_never_becomes_definite_child() -
     assert _dependency_map(result)[("pkg.a", "pkg")] == (
         ("fact-shadowable", ResolutionKind.EXACT_BASE),
     )
-    assert architecture_dependencies(selected) == selected
+    assert ArchitectureDependencyPolicy().select(selected) == selected
 
 
 def test_architecture_suppresses_only_base_for_the_same_fact() -> None:
     modules = (_module("app"), _module("pkg", package=True), _module("pkg.child"))
-    result = resolve_imports(
+    result = StaticImportResolver().resolve(
         (
             _fact(
                 "fact-base",
@@ -513,11 +522,14 @@ def test_architecture_suppresses_only_base_for_the_same_fact() -> None:
         (),
     )
 
-    assert architecture_dependencies(result.dependencies) == result.dependencies
+    assert (
+        ArchitectureDependencyPolicy().select(result.dependencies)
+        == result.dependencies
+    )
 
 
 def test_missing_namespace_child_is_distinct_from_valid_namespace_base() -> None:
-    result = resolve_imports(
+    result = StaticImportResolver().resolve(
         (
             _fact(
                 "fact-missing",

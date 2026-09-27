@@ -195,25 +195,6 @@ def _typing_aliases(tree: ast.Module) -> tuple[set[str], set[str]]:
 
     direct: set[str] = set()
     qualified: set[str] = set()
-    for node in tree.body:
-        if isinstance(node, ast.Import):
-            qualified.update(
-                alias.asname or "typing"
-                for alias in node.names
-                if alias.name == "typing"
-            )
-        elif (
-            isinstance(node, ast.ImportFrom)
-            and node.level == 0
-            and node.module == "typing"
-        ):
-            direct.update(
-                alias.asname or "TYPE_CHECKING"
-                for alias in node.names
-                if alias.name == "TYPE_CHECKING"
-            )
-    if not direct and not qualified:
-        return set(), set()
     conflicting: set[str] = set()
     module_statements = set(tree.body)
     wildcard = False
@@ -313,10 +294,7 @@ def _imports_with_context(
             if isinstance(node, ast.ExceptHandler):
                 child_context = replace(child_context, exception_handler=True)
             for child in value if isinstance(value, list) else (value,):
-                # Explicit import statements cannot occur inside expressions.
-                # Alias analysis above still visits them to catch NamedExpr,
-                # comprehensions and other binding/shadowing expressions.
-                if isinstance(child, ast.AST) and not isinstance(child, ast.expr):
+                if isinstance(child, ast.AST):
                     pending.append((child, child_context))
 
 

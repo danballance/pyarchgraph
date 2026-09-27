@@ -5,12 +5,9 @@ from dataclasses import replace
 
 import pytest
 
-from pyarchgraph.extraction import (
-    _collect_import_facts,
-    _SourceText,
-    canonicalise_fact_ids,
-)
-from pyarchgraph.model import SourceModule
+from pyarchgraph.adapters.extraction import ModuleImportExtractor, _SourceText
+from pyarchgraph.domain.canonicalization import FactCanonicalizer
+from pyarchgraph.domain.model import SourceModule
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
@@ -37,7 +34,7 @@ def test_cached_segments_and_columns_match_reference(newline, trailing):
         if isinstance(node, (ast.Import, ast.ImportFrom))
     }
     facts = tuple(
-        _collect_import_facts(
+        ModuleImportExtractor().extract(
             SourceModule("opaque", "source.py", False, None), source, tree
         )
     )
@@ -56,7 +53,9 @@ def test_cached_segments_and_columns_match_reference(newline, trailing):
             )
         )
     assert facts == tuple(reference)
-    assert canonicalise_fact_ids(facts) == canonicalise_fact_ids(reference)
+    assert FactCanonicalizer().canonicalise(facts) == FactCanonicalizer().canonicalise(
+        reference
+    )
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             assert text.segment(node) == ast.get_source_segment(source, node)
@@ -80,7 +79,7 @@ def test_one_snippet_extraction_per_statement_not_alias(monkeypatch):
 
     monkeypatch.setattr(_SourceText, "segment", segment)
     facts = tuple(
-        _collect_import_facts(
+        ModuleImportExtractor().extract(
             SourceModule("opaque", "source.py", False, None), source, ast.parse(source)
         )
     )

@@ -90,7 +90,7 @@ def cycle_result(tmp_path, monkeypatch):
         )
     view = {
         "dependency_count": 2,
-        "cyclic_source_count": 2,
+        "cyclic_node_count": 2,
         "cyclic_dependency_count": 2,
         "findings": [
             {
@@ -104,6 +104,14 @@ def cycle_result(tmp_path, monkeypatch):
             }
         ],
     }
+    view["findings"] = [
+        {"check_id": "cycles", "severity": "error", "finding": finding}
+        for finding in view["findings"]
+    ]
+    view["nodes"] = [
+        {"id": name, "label": name, "members": [name]} for name in ("a", "b")
+    ]
+    view["enabled_check_ids"] = ["cycles", "unresolved-imports"]
     return {"cwd": str(tmp_path), "original_case": "test"}, {
         "exit_code": 1,
         "stderr": "",
@@ -114,12 +122,12 @@ def cycle_result(tmp_path, monkeypatch):
             "coverage": {"boundaries": []},
             "views": {
                 name: copy.deepcopy(view)
-                for name in ("structural", "non_typing", "module_body")
+                for name in ("structural", "non-typing", "module-body")
             },
         },
         "graphs": {
             name: [["a", "b"], ["b", "a"]]
-            for name in ("structural", "non_typing", "module_body")
+            for name in ("structural", "non-typing", "module-body")
         },
     }
 
@@ -142,8 +150,8 @@ def test_report_audit_rejects_corrupted_cycle_results(
 ):
     case, result = cycle_result
     assert not replay.audit_report(case, result)["errors"]
-    view = result["report"]["views"]["non_typing"]
-    finding = view["findings"][0]
+    view = result["report"]["views"]["non-typing"]
+    finding = view["findings"][0]["finding"]
     edge = finding["witness"][0]
     if corruption == "empty_evidence":
         edge["evidence"] = []
@@ -336,3 +344,50 @@ def test_unknown_replay_case_is_an_error(replay_environment, monkeypatch):
         replay.main()
     assert error.value.code == 2
     assert not replay_environment.exists()
+
+
+def test_profile_comparison_identifies_source_cache_constructor(tmp_path, monkeypatch):
+    from pyarchgraph.adapters.extraction import _SourceText
+
+    monkeypatch.setattr(replay, "ARCHIVE", tmp_path / "archive")
+    replay.ARCHIVE.mkdir()
+    (replay.ARCHIVE / "sympy.current.profile.json").write_text(
+        json.dumps(
+            {
+                "elapsed_seconds_with_profiling": 20,
+                "top_functions": [
+                    {"function": "collect", "cumulative_seconds": 10},
+                    {
+                        "function": "get_source_segment",
+                        "calls": 20,
+                        "cumulative_seconds": 5,
+                    },
+                ],
+            }
+        )
+    )
+    (tmp_path / "sympy.profile.json").write_text(
+        json.dumps(
+            {
+                "total_seconds": 2,
+                "extraction_functions": [
+                    {"function": "collect", "cumulative_seconds": 1},
+                    {
+                        "function": "segment",
+                        "total_calls": 10,
+                        "cumulative_seconds": 0.2,
+                    },
+                    {"function": "__init__", "line": 1, "cumulative_seconds": 0.001},
+                    {
+                        "function": "__init__",
+                        "line": _SourceText.__init__.__code__.co_firstlineno,
+                        "cumulative_seconds": 0.5,
+                    },
+                ],
+            }
+        )
+    )
+    saved = {}
+    monkeypatch.setattr(replay, "write_json", lambda path, value: saved.update(value))
+    replay.profile_comparison(tmp_path)
+    assert saved["current"]["source_cache_cumulative_seconds"] == 0.5

@@ -14,10 +14,13 @@ import networkx as nx
 import pytest
 
 from examples import evaluate
-from pyarchgraph.discovery import discover_modules
-from pyarchgraph.extraction import AstImportFactSource
-from pyarchgraph.model import ImportSyntax, UnresolvedReason
-from pyarchgraph.resolution import architecture_dependencies, resolve_imports
+from pyarchgraph.adapters.discovery import FileSystemSourceDiscovery
+from pyarchgraph.composition import ApplicationFactory
+from pyarchgraph.domain.model import ImportSyntax, UnresolvedReason
+from pyarchgraph.domain.resolution import (
+    ArchitectureDependencyPolicy,
+    StaticImportResolver,
+)
 
 EXAMPLES = evaluate.EXAMPLES
 MANIFEST = evaluate.load_manifest()
@@ -48,26 +51,35 @@ def _structure(project_id, variant_id=None):
     """Inspect engine output without expanding the deliberately small public API."""
     config = _configuration(project_id, variant_id)
     if len(config["source_roots"]) > 1:
-        from pyarchgraph import AnalysisOptions, analyse
+        from pyarchgraph import AnalysisOptions
 
         roots = tuple(
             EXAMPLES / "projects" / project_id / root for root in config["source_roots"]
         )
-        report = analyse(roots, options=AnalysisOptions(details="component-edges"))
+        report = (
+            ApplicationFactory()
+            .create_analyzer()
+            .analyse(roots, options=AnalysisOptions(details="component-edges"))
+        )
         labels = {
             source.id: source.import_name or source.path for source in report.sources
         }
         edges = tuple(
             replace(edge, source=labels[edge.source], target=labels[edge.target])
-            for finding in report.views.structural.findings
+            for registered in report.views["structural"].findings
+            for finding in (registered.finding,)
             if finding.kind == "cycle"
             for edge in finding.dependencies
         )
         return None, None, edges
     root = EXAMPLES / "projects" / project_id / config["source_roots"][0]
-    discovery = discover_modules(root, excludes=tuple(config["exclusions"]))
-    collection = AstImportFactSource().collect(root, discovery.modules)
-    resolution = resolve_imports(
+    discovery = FileSystemSourceDiscovery().discover(
+        root, excludes=tuple(config["exclusions"])
+    )
+    collection = (
+        ApplicationFactory().create_fact_source().collect(root, discovery.modules)
+    )
+    resolution = StaticImportResolver().resolve(
         collection.facts, discovery.modules, discovery.namespace_prefixes
     )
     labels = {
@@ -79,7 +91,7 @@ def _structure(project_id, variant_id=None):
 
     selected = tuple(
         labelled_edge(edge)
-        for edge in architecture_dependencies(resolution.dependencies)
+        for edge in ArchitectureDependencyPolicy().select(resolution.dependencies)
     )
     collection = replace(
         collection,
@@ -116,6 +128,9 @@ def _assert_evidence(evidence, project_id):
         "source_segment",
         "resolution_kind",
         "context",
+        "source",
+        "target",
+        "fact_id",
     }
     assert not Path(evidence["path"]).is_absolute()
     source_path = evaluate.REPOSITORY / evidence["path"]
@@ -158,6 +173,7 @@ def _assert_finding_contract(finding, project_id):
         assert set(finding) == {
             "kind",
             "source",
+            "node",
             "requested",
             "code",
             "message",
@@ -413,7 +429,9 @@ def test_documentation_edits_preserve_semantic_findings_and_update_locations():
     assert {key: value for key, value in old_cycle.items() if key != "witness"} == {
         key: value for key, value in new_cycle.items() if key != "witness"
     }
-    for old_edge, new_edge in zip(old_cycle["witness"], new_cycle["witness"], strict=True):
+    for old_edge, new_edge in zip(
+        old_cycle["witness"], new_cycle["witness"], strict=True
+    ):
         assert (old_edge["source"], old_edge["target"]) == (
             new_edge["source"],
             new_edge["target"],
@@ -444,7 +462,7 @@ def test_evaluator_rejects_changed_counts_certainty_and_extra_findings():
     expected = PROJECTS["definite_cycle"]["expected"]
     report = json.loads(completed.stdout)
     report["sources"].append({**report["sources"][0], "id": "extra-source"})
-    report["views"]["structural"]["findings"][0]["certainty"] = "possible"
+    report["views"]["structural"]["findings"][0]["finding"]["certainty"] = "possible"
     altered = subprocess.CompletedProcess(
         completed.args, completed.returncode, json.dumps(report), ""
     )

@@ -53,7 +53,9 @@ def test_real_cli_reports_representative_concerns_without_execution_or_artifacts
     document = json.loads(first.stdout)
     assert len(document["sources"]) == 6
     assert document["views"]["structural"]["dependency_count"] == 3
-    assert sorted(f["kind"] for f in document["views"]["structural"]["findings"]) == [
+    assert sorted(
+        f["finding"]["kind"] for f in document["views"]["structural"]["findings"]
+    ) == [
         "cycle",
         "cycle",
         "unresolved_import",
@@ -88,7 +90,7 @@ def test_equivalent_import_spellings_are_normalized(tmp_path: Path) -> None:
     _write(tmp_path, "pkg/a.py", "from . import b\n")
     relative = json.loads(_run(tmp_path).stdout)
     assert absolute == relative
-    assert absolute["schema_version"] == "0.6"
+    assert absolute["schema_version"] == "0.7"
     assert len(absolute["sources"]) == 3
     assert absolute["views"]["structural"]["dependency_count"] == 1
     assert absolute["views"]["structural"]["findings"] == []

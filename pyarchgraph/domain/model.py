@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import TYPE_CHECKING
 from enum import Enum
 from typing import Literal
 
-Gate = Literal["structural", "non-typing", "module-body"]
+if TYPE_CHECKING:
+    from pyarchgraph.domain.graph import ViewNode
+
+Gate = str
 Details = Literal["summary", "component-edges"]
 TargetKind = Literal["stub", "native", "generated", "excluded"]
 
@@ -129,7 +135,7 @@ class UnresolvedImport:
 
 @dataclass(frozen=True, slots=True)
 class EvidenceLocation:
-    """Locations use cwd-relative paths and one-based character positions."""
+    """Report locations use base-relative paths and one-based character positions."""
 
     path: str
     line: int
@@ -137,6 +143,9 @@ class EvidenceLocation:
     source_segment: str | None
     resolution_kind: ResolutionKind | None
     context: ImportContext = ImportContext()
+    source: str | None = None
+    target: str | None = None
+    fact_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,27 +202,43 @@ class ImportFinding:
     code: str
     message: str
     evidence: tuple[EvidenceLocation, ...]
+    node: str | None = None
 
 
-Finding = CycleFinding | ImportFinding
+@dataclass(frozen=True, slots=True)
+class RuleFinding:
+    code: str
+    message: str
+    node_ids: tuple[str, ...] = ()
+    source_ids: tuple[str, ...] = ()
+    evidence: tuple[EvidenceLocation, ...] = ()
+    kind: Literal["rule"] = field(default="rule", init=False)
+
+
+Finding = CycleFinding | ImportFinding | RuleFinding
+
+
+@dataclass(frozen=True, slots=True)
+class CheckResult:
+    severity: Severity
+    finding: Finding
+
+
+@dataclass(frozen=True, slots=True)
+class RegisteredFinding:
+    check_id: str
+    severity: Severity
+    finding: Finding
 
 
 @dataclass(frozen=True, slots=True)
 class GraphView:
+    nodes: tuple[ViewNode, ...]
+    enabled_check_ids: tuple[str, ...]
     dependency_count: int
-    cyclic_source_count: int
     cyclic_dependency_count: int
-    findings: tuple[Finding, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class GraphViews:
-    structural: GraphView
-    non_typing: GraphView
-    module_body: GraphView
-
-    def selected(self, gate: Gate) -> GraphView:
-        return getattr(self, gate.replace("-", "_"))
+    cyclic_node_count: int
+    findings: tuple[RegisteredFinding, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,15 +279,25 @@ class AnalysisReport:
     gate: Gate
     sources: tuple[SourceModule, ...]
     coverage: Coverage
-    views: GraphViews
-    schema_version: Literal["0.6"] = field(default="0.6", init=False)
+    views: Mapping[str, GraphView]
+    schema_version: Literal["0.7"] = field(default="0.7", init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "views", MappingProxyType(dict(self.views)))
 
     @property
     def selected_view(self) -> GraphView:
-        return self.views.selected(self.gate)
+        return self.views[self.gate]
 
     @property
     def exit_code(self) -> int:
         return (
-            2 if self.status == "incomplete" else int(bool(self.selected_view.findings))
+            2
+            if self.status == "incomplete"
+            else int(
+                any(
+                    item.severity is Severity.ERROR
+                    for item in self.selected_view.findings
+                )
+            )
         )

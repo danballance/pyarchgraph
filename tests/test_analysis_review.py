@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from pyarchgraph import AnalysisOptions, TargetDeclaration, analyse, render_json
+from pyarchgraph import AnalysisOptions, TargetDeclaration
+from pyarchgraph.adapters.rendering import JsonReportRenderer
+from pyarchgraph.composition import ApplicationFactory
 
 
 def _write(root: Path, files: dict[str, str]) -> None:
@@ -31,7 +33,11 @@ def test_named_package_directory_infers_the_parent_import_root(tmp_path, metadat
             metadata[0]: metadata[1],
         },
     )
-    wrong = analyse((tmp_path,))
+    wrong = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     assert wrong.status == "incomplete" and wrong.exit_code == 2
     errors = [
         item
@@ -40,7 +46,11 @@ def test_named_package_directory_infers_the_parent_import_root(tmp_path, metadat
     ]
     assert len(errors) == 1
     assert "below python_code/" in errors[0].message
-    corrected = analyse((tmp_path, tmp_path / "python_code"))
+    corrected = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path, tmp_path / "python_code"), options=AnalysisOptions())
+    )
     assert corrected.status == "complete" and corrected.exit_code == 0
     assert corrected.selected_view.dependency_count == 1
 
@@ -55,7 +65,11 @@ def test_named_subpackage_mapping_strips_the_whole_package_suffix(tmp_path):
             "pyproject.toml": '[tool.setuptools.package-dir]\n"acme.service" = "python_code/acme/service"\n',
         },
     )
-    report = analyse((tmp_path,))
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     assert report.exit_code == 2
     assert any(
         item.code == "source_root_mismatch" and "below python_code/" in item.message
@@ -80,7 +94,11 @@ def test_renamed_packaging_directory_is_an_explicit_coverage_error(tmp_path, met
             metadata[0]: metadata[1],
         },
     )
-    report = analyse((tmp_path,))
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     assert report.exit_code == 2
     assert any(
         item.code == "unsupported_package_mapping"
@@ -98,10 +116,18 @@ def test_unused_or_excluded_package_alias_does_not_create_a_root_error(tmp_path)
             "pyproject.toml": '[tool.setuptools.package-dir]\npkg = "implementation"\n',
         },
     )
-    assert analyse((tmp_path,)).exit_code == 0
+    assert (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+        .exit_code
+        == 0
+    )
     (tmp_path / "app.py").write_text("import pkg.api\n")
-    excluded = analyse(
-        (tmp_path,), options=AnalysisOptions(excludes=("implementation",))
+    excluded = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions(excludes=("implementation",)))
     )
     assert excluded.exit_code == 0
 
@@ -117,7 +143,9 @@ def test_regular_package_cannot_absorb_another_roots_namespace_fragment(tmp_path
         },
     )
     roots = (tmp_path / "one", tmp_path / "two")
-    report = analyse(roots)
+    report = (
+        ApplicationFactory().create_analyzer().analyse(roots, options=AnalysisOptions())
+    )
     assert report.status == "incomplete" and report.exit_code == 2
     assert report.selected_view.dependency_count == 1
     assert any(
@@ -125,7 +153,11 @@ def test_regular_package_cannot_absorb_another_roots_namespace_fragment(tmp_path
     )
     child = next(item for item in report.sources if item.import_name == "pkg.child")
     assert child.binding_status == "ambiguous"
-    assert render_json(report) == render_json(analyse(tuple(reversed(roots))))
+    assert JsonReportRenderer().render(report) == JsonReportRenderer().render(
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse(tuple(reversed(roots)), options=AnalysisOptions())
+    )
 
 
 def test_pure_namespace_fragments_can_merge_across_roots(tmp_path):
@@ -136,7 +168,11 @@ def test_pure_namespace_fragments_can_merge_across_roots(tmp_path):
             "two/ns/second.py": "",
         },
     )
-    report = analyse((tmp_path / "one", tmp_path / "two"))
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path / "one", tmp_path / "two"), options=AnalysisOptions())
+    )
     assert report.status == "complete" and report.exit_code == 0
     assert report.selected_view.dependency_count == 1
 
@@ -151,7 +187,11 @@ def test_regular_subpackage_only_blocks_its_own_foreign_namespace_descendants(tm
             "two/ns/other.py": "",
         },
     )
-    report = analyse((tmp_path / "one", tmp_path / "two"))
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path / "one", tmp_path / "two"), options=AnalysisOptions())
+    )
     assert report.exit_code == 2
     assert report.selected_view.dependency_count == 1
     assert (
@@ -194,9 +234,13 @@ def test_acknowledged_foreign_target_cannot_bypass_regular_package_boundary(
             ),
         )
     )
-    report = analyse(
-        (tmp_path / "one", tmp_path / "two"),
-        options=AnalysisOptions(excludes=excludes, targets=declarations),
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse(
+            (tmp_path / "one", tmp_path / "two"),
+            options=AnalysisOptions(excludes=excludes, targets=declarations),
+        )
     )
     assert report.exit_code == 2
     assert report.coverage.boundaries[0].acknowledged
@@ -208,19 +252,23 @@ def test_acknowledged_foreign_target_cannot_bypass_regular_package_boundary(
 
 def test_declared_build_target_can_have_sources_outside_the_python_package(tmp_path):
     _write(tmp_path, {"pkg/__init__.py": "", "pkg/app.py": "import pkg.extension\n"})
-    report = analyse(
-        (tmp_path,),
-        options=AnalysisOptions(
-            targets=(
-                TargetDeclaration(
-                    "pkg.extension",
-                    "native",
-                    "Build mapping names the installed extension",
-                    path="native_code/implementation.c",
-                    acknowledged=True,
-                ),
-            )
-        ),
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse(
+            (tmp_path,),
+            options=AnalysisOptions(
+                targets=(
+                    TargetDeclaration(
+                        "pkg.extension",
+                        "native",
+                        "Build mapping names the installed extension",
+                        path="native_code/implementation.c",
+                        acknowledged=True,
+                    ),
+                )
+            ),
+        )
     )
     assert report.exit_code == 0
     assert report.coverage.boundaries[0].kind == "native"
@@ -235,18 +283,22 @@ def test_generated_declaration_coexists_with_a_companion_stub(tmp_path):
             "pkg/generated.pyi": "",
         },
     )
-    report = analyse(
-        (tmp_path,),
-        options=AnalysisOptions(
-            targets=(
-                TargetDeclaration(
-                    "pkg.generated",
-                    "generated",
-                    "Generated at packaging time",
-                    acknowledged=True,
-                ),
-            )
-        ),
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse(
+            (tmp_path,),
+            options=AnalysisOptions(
+                targets=(
+                    TargetDeclaration(
+                        "pkg.generated",
+                        "generated",
+                        "Generated at packaging time",
+                        acknowledged=True,
+                    ),
+                )
+            ),
+        )
     )
     assert report.exit_code == 0
     (boundary,) = report.coverage.boundaries
@@ -267,8 +319,13 @@ def test_acknowledgement_cannot_create_children_below_a_nonpackage(tmp_path, kin
                 "plain.child", kind, "Accepted boundary", acknowledged=True
             ),
         )
-    report = analyse(
-        (tmp_path,), options=AnalysisOptions(excludes=excludes, targets=declarations)
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse(
+            (tmp_path,),
+            options=AnalysisOptions(excludes=excludes, targets=declarations),
+        )
     )
     assert report.exit_code == 2
     assert report.coverage.boundaries[0].acknowledged

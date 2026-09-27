@@ -2,9 +2,10 @@ import json
 
 import pytest
 
-from pyarchgraph.cli import main
-from pyarchgraph.configuration import load_options, validate_options
-from pyarchgraph.model import AnalysisOptions, TargetDeclaration
+from pyarchgraph.adapters.configuration import TomlOptionsReader
+from pyarchgraph.application.validation import OptionValidator
+from pyarchgraph.composition import ApplicationFactory
+from pyarchgraph.domain.model import AnalysisOptions, TargetDeclaration
 
 
 def test_explicit_config_parses_ownership_and_relative_boundary_path(
@@ -17,7 +18,7 @@ def test_explicit_config_parses_ownership_and_relative_boundary_path(
     path.write_text(
         'owned_prefixes = ["acme"]\n[[targets]]\nname="acme.native"\nkind="native"\nreason="Built separately"\npath="../native.pyx"\nacknowledged=true\n'
     )
-    options = load_options(
+    options = TomlOptionsReader(OptionValidator()).load(
         path, excludes=("generated",), gate="module-body", details="component-edges"
     )
     assert options.owned_prefixes == ("acme",)
@@ -43,13 +44,14 @@ def test_invalid_config_is_rejected_before_analysis(tmp_path, contents):
     path = tmp_path / "config.toml"
     path.write_text(contents)
     with pytest.raises(ValueError):
-        load_options(path, excludes=(), gate="structural", details="summary")
+        TomlOptionsReader(OptionValidator()).load(
+            path, excludes=(), gate="structural", details="summary"
+        )
 
 
 @pytest.mark.parametrize(
     "options",
     [
-        AnalysisOptions(gate="runtime"),
         AnalysisOptions(details="all"),
         AnalysisOptions(excludes=["bad"]),
         AnalysisOptions(owned_prefixes=("bad/name",)),
@@ -63,7 +65,7 @@ def test_invalid_config_is_rejected_before_analysis(tmp_path, contents):
 )
 def test_invalid_api_options_are_rejected(options):
     with pytest.raises(ValueError):
-        validate_options(options)
+        OptionValidator().validate(options)
 
 
 def test_cli_boundary_acknowledgement_and_gate_never_bypass_missing_coverage(
@@ -76,11 +78,21 @@ def test_cli_boundary_acknowledgement_and_gate_never_bypass_missing_coverage(
     config.write_text(
         '[[targets]]\nname="generated"\nkind="generated"\nreason="Created by release build"\n'
     )
-    assert main([str(tmp_path), "--config", str(config), "--gate", "module-body"]) == 2
+    assert (
+        ApplicationFactory()
+        .create_cli()
+        .run([str(tmp_path), "--config", str(config), "--gate", "module-body"])
+        == 2
+    )
     before = json.loads(capsys.readouterr().out)
-    assert before["views"]["module_body"]["findings"] == []
+    assert before["views"]["module-body"]["findings"] == []
     config.write_text(config.read_text() + "acknowledged=true\n")
-    assert main([str(tmp_path), "--config", str(config), "--gate", "module-body"]) == 0
+    assert (
+        ApplicationFactory()
+        .create_cli()
+        .run([str(tmp_path), "--config", str(config), "--gate", "module-body"])
+        == 0
+    )
     after = json.loads(capsys.readouterr().out)
     assert after["coverage"]["boundaries"][0]["acknowledged"]
 
@@ -88,5 +100,12 @@ def test_cli_boundary_acknowledgement_and_gate_never_bypass_missing_coverage(
 def test_config_is_not_discovered_implicitly(tmp_path, capsys):
     (tmp_path / "a.py").write_text("")
     (tmp_path / "pyarchgraph.toml").write_text("not valid toml {")
-    assert main([str(tmp_path)]) == 0
+    assert ApplicationFactory().create_cli().run([str(tmp_path)]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "complete"
+
+
+def test_unknown_gate_is_rejected_before_discovery(tmp_path):
+    with pytest.raises(ValueError, match="gate"):
+        ApplicationFactory().create_analyzer().analyse(
+            (tmp_path / "absent",), options=AnalysisOptions(gate="runtime")
+        )

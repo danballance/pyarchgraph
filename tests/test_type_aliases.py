@@ -8,10 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from pyarchgraph import analyse
-from pyarchgraph.cli import main
-from pyarchgraph.discovery import discover_modules
-from pyarchgraph.extraction import AstImportFactSource
+from pyarchgraph.adapters.discovery import FileSystemSourceDiscovery
+from pyarchgraph.composition import ApplicationFactory
+from pyarchgraph.domain.model import AnalysisOptions
 
 pytestmark = pytest.mark.skipif(sys.version_info < (3, 12), reason="PEP 695 syntax")
 
@@ -56,7 +55,11 @@ def test_type_declarations_leave_only_explicit_import_dependencies(
 ) -> None:
     _sources(tmp_path, declaration)
 
-    result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, FileSystemSourceDiscovery().discover(tmp_path).modules)
+    )
 
     assert result.diagnostics == ()
     assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
@@ -64,9 +67,13 @@ def test_type_declarations_leave_only_explicit_import_dependencies(
         ("a", "importlib"),
         ("b", "a"),
     ]
-    report = analyse((tmp_path,))
-    assert report.views.structural.dependency_count == 2
-    assert report.views.structural.findings == ()
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
+    assert report.views["structural"].dependency_count == 2
+    assert report.views["structural"].findings == ()
 
 
 @pytest.mark.skipif(sys.version_info < (3, 13), reason="PEP 696 syntax")
@@ -95,7 +102,11 @@ def test_type_parameter_defaults_are_not_interpreted(
 ) -> None:
     _sources(tmp_path, definition.format(parameters=parameters))
 
-    result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, FileSystemSourceDiscovery().discover(tmp_path).modules)
+    )
 
     assert result.diagnostics == ()
     assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
@@ -103,7 +114,14 @@ def test_type_parameter_defaults_are_not_interpreted(
         ("a", "importlib"),
         ("b", "a"),
     ]
-    assert analyse((tmp_path,)).views.structural.findings == ()
+    assert (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+        .views["structural"]
+        .findings
+        == ()
+    )
 
 
 def test_generic_bodies_keep_explicit_imports(tmp_path: Path) -> None:
@@ -114,9 +132,14 @@ def test_generic_bodies_keep_explicit_imports(tmp_path: Path) -> None:
         "    return value\n",
     )
 
-    report = analyse((tmp_path,))
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
 
-    (cycle,) = report.views.structural.findings
+    (cycle,) = report.views["structural"].findings
+    cycle = cycle.finding
     assert cycle.kind == "cycle"
     assert cycle.certainty == "definite"
     names = {item.id: item.import_name for item in report.sources}
@@ -132,7 +155,7 @@ def test_cli_does_not_evaluate_type_alias_expressions(
         'type Alias = explode()\ntype DynamicAlias = load("b")\n',
     )
 
-    assert main([str(tmp_path)]) == 0
+    assert ApplicationFactory().create_cli().run([str(tmp_path)]) == 0
     captured = capsys.readouterr()
     document = json.loads(captured.out)
     assert captured.err == ""

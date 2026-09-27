@@ -3,16 +3,19 @@
 from dataclasses import replace
 from pathlib import Path
 
-from pyarchgraph.discovery import discover_modules
-from pyarchgraph.extraction import AstImportFactSource
-from pyarchgraph.model import (
+from pyarchgraph.adapters.discovery import FileSystemSourceDiscovery
+from pyarchgraph.composition import ApplicationFactory
+from pyarchgraph.domain.model import (
     ExternalClassification,
     ResolutionKind,
     Severity,
     TargetDeclaration,
     UnresolvedReason,
 )
-from pyarchgraph.resolution import architecture_dependencies, resolve_imports
+from pyarchgraph.domain.resolution import (
+    ArchitectureDependencyPolicy,
+    StaticImportResolver,
+)
 
 
 def _resolve(
@@ -22,10 +25,12 @@ def _resolve(
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding="utf-8")
-    inventory = discover_modules(root, excludes=excludes)
-    collection = AstImportFactSource().collect(root, inventory.modules)
+    inventory = FileSystemSourceDiscovery().discover(root, excludes=excludes)
+    collection = (
+        ApplicationFactory().create_fact_source().collect(root, inventory.modules)
+    )
     assert not collection.diagnostics
-    result = resolve_imports(
+    result = StaticImportResolver().resolve(
         collection.facts,
         inventory.modules,
         inventory.namespace_prefixes,
@@ -55,7 +60,10 @@ def test_ordinary_module_from_self_imports_survive_all_spellings(
     assert all(
         item.resolution_kind is ResolutionKind.EXACT_BASE for item in edge.evidence
     )
-    assert architecture_dependencies(result.dependencies) == result.dependencies
+    assert (
+        ArchitectureDependencyPolicy().select(result.dependencies)
+        == result.dependencies
+    )
 
 
 def test_initializer_suppression_and_child_normalization_use_source_ids(
@@ -69,7 +77,7 @@ def test_initializer_suppression_and_child_normalization_use_source_ids(
             "app.py": "from pkg import child\nimport pkg\n",
         },
     )
-    selected = architecture_dependencies(result.dependencies)
+    selected = ArchitectureDependencyPolicy().select(result.dependencies)
     pairs = {(edge.source, edge.target): edge for edge in selected}
     assert set(pairs) == {
         ("source:pkg/__init__.py", "source:pkg/child.py"),
@@ -114,7 +122,7 @@ def test_pure_namespace_ownership_requires_an_explicit_prefix(tmp_path: Path) ->
     )
     assert conservative.unresolved_imports == ()
     assert conservative.external_imports[0].requested == "ns.missing"
-    explicit = resolve_imports(
+    explicit = StaticImportResolver().resolve(
         collection.facts,
         inventory.modules,
         inventory.namespace_prefixes,
@@ -359,7 +367,7 @@ def test_cross_root_ambiguity_propagates_to_child_imports(tmp_path: Path) -> Non
     extra = replace(
         package, id="source:other/pkg/__init__.py", path="other/pkg/__init__.py"
     )
-    result = resolve_imports(
+    result = StaticImportResolver().resolve(
         collection.facts, (*inventory.modules, extra), inventory.namespace_prefixes
     )
     assert result.dependencies == ()
@@ -398,7 +406,7 @@ def test_ambiguous_package_does_not_invent_an_ambiguous_attribute_module(
     extra = replace(
         package, id="source:other/pkg/__init__.py", path="other/pkg/__init__.py"
     )
-    result = resolve_imports(
+    result = StaticImportResolver().resolve(
         collection.facts, (*inventory.modules, extra), inventory.namespace_prefixes
     )
     assert [(item.requested, item.reason) for item in result.unresolved_imports] == [

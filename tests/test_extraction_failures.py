@@ -8,11 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from pyarchgraph import analyse, extraction
-from pyarchgraph.cli import main
-from pyarchgraph.discovery import discover_modules
-from pyarchgraph.extraction import AstImportFactSource
-from pyarchgraph.model import Severity, SourceModule
+from pyarchgraph.adapters import extraction
+from pyarchgraph.adapters.discovery import FileSystemSourceDiscovery
+from pyarchgraph.composition import ApplicationFactory
+from pyarchgraph.domain.model import AnalysisOptions, Severity, SourceModule
 
 
 def _module(name: str) -> SourceModule:
@@ -43,14 +42,22 @@ def test_source_parser_limit_reports_failure_and_continues(
     _sources(tmp_path)
     _inject_parse_limit(monkeypatch)
 
-    result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, FileSystemSourceDiscovery().discover(tmp_path).modules)
+    )
     assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
         ("good", "target")
     ]
     assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
         ("source_analysis_limit", "broken.py", Severity.ERROR)
     ]
-    report = analyse((tmp_path,))
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     assert report.status == "incomplete"
     assert "source_analysis_limit" in {
         item.code for item in report.coverage.diagnostics
@@ -65,7 +72,7 @@ def test_cli_analysis_limit_emits_incomplete_partial_report(
     _sources(tmp_path)
     _inject_parse_limit(monkeypatch)
 
-    assert main([str(tmp_path)]) == 2
+    assert ApplicationFactory().create_cli().run([str(tmp_path)]) == 2
     captured = capsys.readouterr()
     document = json.loads(captured.out)
     assert document["status"] == "incomplete"
@@ -84,7 +91,11 @@ def test_valid_long_expression_does_not_require_recursive_traversal(
     (tmp_path / "good.py").write_text("import other\n")
     (tmp_path / "other.py").write_text("")
 
-    result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, FileSystemSourceDiscovery().discover(tmp_path).modules)
+    )
 
     assert result.diagnostics == ()
     assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
@@ -104,7 +115,9 @@ def test_direct_collector_rejects_fifo_before_opening(
 
     monkeypatch.setattr(extraction.tokenize, "open", forbidden_open)
 
-    result = AstImportFactSource().collect(tmp_path, (_module("pipe"),))
+    result = (
+        ApplicationFactory().create_fact_source().collect(tmp_path, (_module("pipe"),))
+    )
 
     assert result.facts == ()
     assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
@@ -127,7 +140,11 @@ def test_direct_collector_accepts_regular_files_and_file_symlinks(
     else:
         source_path.write_text("import target\n")
 
-    result = AstImportFactSource().collect(tmp_path, (_module("source"),))
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, (_module("source"),))
+    )
 
     assert result.diagnostics == ()
     assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
@@ -150,18 +167,26 @@ def test_unreadable_source_fails_collection_analysis_and_cli(
 
     monkeypatch.setattr(extraction.tokenize, "open", open_source)
 
-    result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, FileSystemSourceDiscovery().discover(tmp_path).modules)
+    )
     assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
         ("good", "target")
     ]
     assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
         ("source_read_error", "broken.py", Severity.ERROR)
     ]
-    report = analyse((tmp_path,))
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     assert report.status == "incomplete"
     assert "source_read_error" in {item.code for item in report.coverage.diagnostics}
 
-    assert main([str(tmp_path)]) == 2
+    assert ApplicationFactory().create_cli().run([str(tmp_path)]) == 2
     captured = capsys.readouterr()
     document = json.loads(captured.out)
     assert document["status"] == "incomplete"

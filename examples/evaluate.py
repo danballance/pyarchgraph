@@ -73,7 +73,10 @@ def _matches(actual: Any, expected: Any) -> bool:
         return (
             isinstance(actual, list)
             and len(actual) == len(expected)
-            and all(_matches(left, right) for left, right in zip(actual, expected, strict=True))
+            and all(
+                _matches(left, right)
+                for left, right in zip(actual, expected, strict=True)
+            )
         )
     return actual == expected
 
@@ -99,8 +102,14 @@ def semantic_view(report: dict[str, Any], view: str | None = None) -> dict[str, 
             return labels.get(value, value)
         return value
 
-    selected = report["views"][view or report["gate"].replace("-", "_")]
-    return {"module_count": len(report["sources"]), **labelled(selected)}
+    selected = report["views"][view or report["gate"]]
+    return {
+        "module_count": len(report["sources"]),
+        "dependency_count": selected["dependency_count"],
+        "cyclic_source_count": selected["cyclic_node_count"],
+        "cyclic_dependency_count": selected["cyclic_dependency_count"],
+        "findings": [labelled(item["finding"]) for item in selected["findings"]],
+    }
 
 
 def check_result(
@@ -125,13 +134,13 @@ def check_result(
         "views",
     }:
         return [*errors, "report has an invalid top-level contract"]
-    if report["schema_version"] != "0.6":
-        errors.append("schema_version must be '0.6'")
+    if report["schema_version"] != "0.7":
+        errors.append("schema_version must be '0.7'")
     if report["status"] != expected["status"]:
         errors.append(
             f"status is {report['status']!r}, expected {expected['status']!r}"
         )
-    if set(report["views"]) != {"structural", "non_typing", "module_body"}:
+    if set(report["views"]) != {"structural", "non-typing", "module-body"}:
         return [*errors, "report must contain exactly the three graph views"]
     actual_codes = {item["code"] for item in report["coverage"]["diagnostics"]}
     for code in expected.get("diagnostics", []):
@@ -207,7 +216,11 @@ def main() -> int:
         widths = [max(len(row[column]) for row in table) for column in range(4)]
         print(f"Architecture corpus: {len(report['results'])} runs")
         for row in table:
-            print("  ".join(value.ljust(width) for value, width in zip(row, widths, strict=True)))
+            print(
+                "  ".join(
+                    value.ljust(width) for value, width in zip(row, widths, strict=True)
+                )
+            )
         for row in report["results"]:
             for error in row["errors"]:
                 print(f"{row['project']}/{row['variant'] or 'default'}: {error}")

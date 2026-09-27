@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from pyarchgraph.discovery import _remove_ambiguous_groups, discover_modules
-from pyarchgraph.model import ExcludedPath, Severity, SourceModule
+from pyarchgraph.adapters.discovery import FileSystemSourceDiscovery
+from pyarchgraph.domain.model import ExcludedPath, Severity, SourceModule
 
 
 def _write_files(root: Path, paths: list[str]) -> None:
@@ -31,7 +31,7 @@ def test_maps_modules_packages_main_modules_and_namespace_prefixes(
         "namespace/deep/tool.py",
     ]
     _write_files(tmp_path, paths)
-    result = discover_modules(tmp_path)
+    result = FileSystemSourceDiscovery().discover(tmp_path)
     assert [
         (item.id, item.import_name, item.is_package, item.parent_package)
         for item in result.modules
@@ -68,7 +68,7 @@ def test_default_directory_exclusions_apply_at_every_depth_but_tests_remain(
             "pkg/build/also_ignored.py",
         ],
     )
-    result = discover_modules(tmp_path)
+    result = FileSystemSourceDiscovery().discover(tmp_path)
     assert [module.import_name for module in result.modules] == [
         "keep",
         "tests.test_keep",
@@ -100,7 +100,9 @@ def test_user_exclusion_globs_are_or_combined_for_directories_and_files(
             "other/keep.py",
         ],
     )
-    result = discover_modules(tmp_path, excludes=("pkg/generated", "*_generated.py"))
+    result = FileSystemSourceDiscovery().discover(
+        tmp_path, excludes=("pkg/generated", "*_generated.py")
+    )
     assert [module.import_name for module in result.modules] == [
         "other.keep",
         "pkg.keep",
@@ -125,7 +127,7 @@ def test_invalid_exclusion_patterns_fail_before_discovery(
     tmp_path: Path, pattern: str
 ) -> None:
     with pytest.raises(ValueError):
-        discover_modules(tmp_path, excludes=(pattern,))
+        FileSystemSourceDiscovery().discover(tmp_path, excludes=(pattern,))
 
 
 def test_unusual_names_keep_lossless_identities_and_other_sources_keep_paths(
@@ -145,7 +147,7 @@ def test_unusual_names_keep_lossless_identities_and_other_sources_keep_paths(
             "foo.bar.py",
         ],
     )
-    result = discover_modules(tmp_path)
+    result = FileSystemSourceDiscovery().discover(tmp_path)
     by_path = {module.path: module for module in result.modules}
     assert len(by_path) == 9
     for path in (
@@ -175,7 +177,7 @@ def test_package_precedence_keeps_shadowed_file_and_all_package_children(
     _write_files(
         tmp_path, ["safe.py", "thing.py", "thing/__init__.py", "thing/child.py"]
     )
-    result = discover_modules(tmp_path)
+    result = FileSystemSourceDiscovery().discover(tmp_path)
     assert len(result.modules) == 4
     assert {module.path: module.binding_status for module in result.modules} == {
         "safe.py": "bound",
@@ -194,7 +196,7 @@ def test_non_package_prefix_keeps_sources_but_disables_descendant_bindings(
     _write_files(
         tmp_path, ["a.py", "a/child.py", "a/deep/grandchild.py", "unrelated.py"]
     )
-    result = discover_modules(tmp_path)
+    result = FileSystemSourceDiscovery().discover(tmp_path)
     assert len(result.modules) == 4
     assert {module.path: module.binding_status for module in result.modules} == {
         "a.py": "bound",
@@ -215,7 +217,7 @@ def test_symlinked_directories_are_not_followed(tmp_path: Path) -> None:
     _write_files(source_root, ["real.py"])
     _write_files(outside, ["hidden.py"])
     (source_root / "linked").symlink_to(outside, target_is_directory=True)
-    result = discover_modules(source_root)
+    result = FileSystemSourceDiscovery().discover(source_root)
     assert [module.import_name for module in result.modules] == ["real"]
     assert result.namespace_prefixes == ()
     assert result.excluded_paths == (
@@ -231,7 +233,7 @@ def test_result_order_is_independent_of_filesystem_walk_order(
     _write_files(
         tmp_path, ["z.py", "ns/b.py", "pkg/__init__.py", "pkg/a.py", "bad-name.py"]
     )
-    expected = discover_modules(tmp_path)
+    expected = FileSystemSourceDiscovery().discover(tmp_path)
     entries = [
         (directory, list(directories), list(files))
         for directory, directories, files in os.walk(tmp_path)
@@ -241,8 +243,8 @@ def test_result_order_is_independent_of_filesystem_walk_order(
         for directory, directories, files in reversed(entries):
             yield directory, list(reversed(directories)), list(reversed(files))
 
-    monkeypatch.setattr("pyarchgraph.discovery.os.walk", reversed_walk)
-    assert discover_modules(tmp_path) == expected
+    monkeypatch.setattr("pyarchgraph.adapters.discovery.os.walk", reversed_walk)
+    assert FileSystemSourceDiscovery().discover(tmp_path) == expected
 
 
 def _pairwise_binding_reference(candidates: list[SourceModule]) -> dict[str, str]:
@@ -290,10 +292,14 @@ def test_prefix_index_matches_pairwise_reference_for_generated_inventories() -> 
                 )
             )
         expected = _pairwise_binding_reference(candidates)
-        modules, diagnostics = _remove_ambiguous_groups(candidates)
+        modules, diagnostics = FileSystemSourceDiscovery()._remove_ambiguous_groups(
+            candidates
+        )
         assert {module.id: module.binding_status for module in modules} == expected
         assert len(modules) == len(candidates)
-        assert _remove_ambiguous_groups(reversed(candidates)) == (modules, diagnostics)
+        assert FileSystemSourceDiscovery()._remove_ambiguous_groups(
+            reversed(candidates)
+        ) == (modules, diagnostics)
 
 
 def test_nested_package_precedence_does_not_shadow_other_descendants(
@@ -313,7 +319,7 @@ def test_nested_package_precedence_does_not_shadow_other_descendants(
             "safe/child.py",
         ],
     )
-    result = discover_modules(tmp_path)
+    result = FileSystemSourceDiscovery().discover(tmp_path)
     assert len(result.modules) == 9
     assert {
         module.path for module in result.modules if module.binding_status == "shadowed"
@@ -330,7 +336,7 @@ def test_non_regular_source_is_diagnosed_and_retained_in_inventory(
 ) -> None:
     _write_files(tmp_path, ["ordinary.py"])
     os.mkfifo(tmp_path / "pipe.py")
-    result = discover_modules(tmp_path)
+    result = FileSystemSourceDiscovery().discover(tmp_path)
     assert [module.path for module in result.modules] == ["ordinary.py", "pipe.py"]
     assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
         ("source_not_regular", "pipe.py", Severity.ERROR)
@@ -366,7 +372,7 @@ def test_regular_file_symlinks_are_retained(tmp_path: Path) -> None:
         (source / "linked.py").symlink_to(target)
     except (NotImplementedError, OSError):
         pytest.skip("file symlinks are unavailable")
-    result = discover_modules(source)
+    result = FileSystemSourceDiscovery().discover(source)
     assert [module.import_name for module in result.modules] == ["linked", "ordinary"]
     assert result.diagnostics == ()
 
@@ -375,10 +381,10 @@ def test_disappearing_source_remains_in_inventory_with_read_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "pyarchgraph.discovery.os.walk",
+        "pyarchgraph.adapters.discovery.os.walk",
         lambda *args, **kwargs: [(str(tmp_path), [], ["missing.py"])],
     )
-    result = discover_modules(tmp_path)
+    result = FileSystemSourceDiscovery().discover(tmp_path)
     assert [module.path for module in result.modules] == ["missing.py"]
     assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
         ("source_read_error", "missing.py", Severity.ERROR)
@@ -401,7 +407,7 @@ def test_inventory_recognizes_stub_and_native_targets_without_graph_nodes(
             "pkg/stubs/__init__.pyi",
         ],
     )
-    result = discover_modules(tmp_path)
+    result = FileSystemSourceDiscovery().discover(tmp_path)
     assert [module.path for module in result.modules] == ["app.py"]
     assert {(target.name, target.kind) for target in result.targets} == {
         ("pkg.stub", "stub"),
@@ -417,7 +423,7 @@ def test_selected_root_pruning_is_exact_and_does_not_create_excluded_target(
     tmp_path: Path,
 ) -> None:
     _write_files(tmp_path, ["main.py", "src/pkg/a.py", "nested/src/kept.py"])
-    result = discover_modules(tmp_path, pruned_directories=("src",))
+    result = FileSystemSourceDiscovery().discover(tmp_path, pruned_directories=("src",))
     assert [module.path for module in result.modules] == [
         "main.py",
         "nested/src/kept.py",

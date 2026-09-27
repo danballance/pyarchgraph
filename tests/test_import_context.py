@@ -4,15 +4,17 @@ from pathlib import Path
 
 import pytest
 
-from benchmarks.reference_extraction import AstImportFactSource as ReferenceFactSource
-from pyarchgraph.extraction import AstImportFactSource
-from pyarchgraph.model import SourceModule
+from benchmarks.reference_adapter import ReferenceFactSource
+from pyarchgraph.composition import ApplicationFactory
+from pyarchgraph.domain.model import SourceModule
 
 
 def _contexts(tmp_path: Path, source: str, *, package: bool = False):
     (tmp_path / "source.py").write_text(source, encoding="utf-8")
-    result = AstImportFactSource().collect(
-        tmp_path, (SourceModule("opaque-source", "source.py", package, None),)
+    result = (
+        ApplicationFactory()
+        .create_fact_source()
+        .collect(tmp_path, (SourceModule("opaque-source", "source.py", package, None),))
     )
     assert result == ReferenceFactSource().collect(
         tmp_path, (SourceModule("opaque-source", "source.py", package, None),)
@@ -163,11 +165,15 @@ def test_context_changes_fact_identity(tmp_path: Path):
     path.write_text(
         "from typing import TYPE_CHECKING as TC\nif TC:\n    import target\n"
     )
-    before = AstImportFactSource().collect(tmp_path, (module,)).facts[-1]
+    before = (
+        ApplicationFactory().create_fact_source().collect(tmp_path, (module,)).facts[-1]
+    )
     path.write_text(
         "from otherx import TYPE_CHECKING as TC\nif TC:\n    import target\n"
     )
-    after = AstImportFactSource().collect(tmp_path, (module,)).facts[-1]
+    after = (
+        ApplicationFactory().create_fact_source().collect(tmp_path, (module,)).facts[-1]
+    )
     assert before.line == after.line and before.column == after.column
     assert before.source_segment == after.source_segment
     assert before.context.typing_only and not after.context.typing_only

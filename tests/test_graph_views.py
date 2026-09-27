@@ -4,17 +4,59 @@ from dataclasses import replace
 
 import pytest
 
-from pyarchgraph.findings import build_findings, build_views
-from pyarchgraph.model import (
+from pyarchgraph.adapters.networkx_graph import NetworkXGraphAlgorithms
+from pyarchgraph.application.strategies import (
+    CheckRegistration,
+    StrategyEngine,
+    StrategyRegistry,
+    ViewRegistration,
+)
+from pyarchgraph.domain.graph import AnalysisSnapshot
+from pyarchgraph.domain.model import (
     DependencyEdge,
     DependencyEvidence,
     ImportContext,
     ImportFact,
     ImportSyntax,
     ResolutionKind,
+    SourceModule,
     UnresolvedImport,
     UnresolvedReason,
 )
+from pyarchgraph.domain.strategies import (
+    CycleCheck,
+    ModuleBodyView,
+    NonTypingView,
+    StructuralView,
+    UnresolvedImportCheck,
+)
+
+
+def evaluate_views(dependencies, facts, unresolved, *, details="summary"):
+    sources = tuple(
+        SourceModule(source, f"{source}.py", False, source)
+        for source in sorted(
+            {fact.source for fact in facts}
+            | {source for edge in dependencies for source in (edge.source, edge.target)}
+        )
+    )
+    registry = StrategyRegistry(
+        (
+            ViewRegistration("structural", StructuralView()),
+            ViewRegistration("non-typing", NonTypingView()),
+            ViewRegistration("module-body", ModuleBodyView()),
+        ),
+        (
+            CheckRegistration("cycles", CycleCheck()),
+            CheckRegistration("unresolved-imports", UnresolvedImportCheck()),
+        ),
+    )
+    snapshot = AnalysisSnapshot(
+        sources, facts, dependencies, unresolved_imports=unresolved
+    )
+    return StrategyEngine(registry, NetworkXGraphAlgorithms()).evaluate(
+        snapshot, details=details
+    )
 
 
 def fact(source, target, *, line=1, context=ImportContext(), alias=0):
@@ -52,17 +94,19 @@ def test_views_filter_sites_and_keep_mixed_edge_support():
     module = fact("a", "b", line=3)
     reverse = fact("b", "a")
     facts = (typing, local, module, reverse)
-    views = build_views(
+    views = evaluate_views(
         (edge("a", "b", *facts[:3]), edge("b", "a", reverse)), facts, ()
     )
     for view, lines in (
-        (views.structural, [1, 2, 3]),
-        (views.non_typing, [2, 3]),
-        (views.module_body, [3]),
+        (views["structural"], [1, 2, 3]),
+        (views["non-typing"], [2, 3]),
+        (views["module-body"], [3]),
     ):
         assert view.dependency_count == view.cyclic_dependency_count == 2
-        assert view.cyclic_source_count == 2
-        forward = next(item for item in view.findings[0].witness if item.source == "a")
+        assert view.cyclic_node_count == 2
+        forward = next(
+            item for item in view.findings[0].finding.witness if item.source == "a"
+        )
         assert [item.line for item in forward.evidence] == lines
 
 
@@ -78,42 +122,50 @@ def test_excluding_exact_support_downgrades_to_possible():
             DependencyEvidence(probable.id, ResolutionKind.PROBABLE_SUBMODULE),
         ),
     )
-    views = build_views(
+    views = evaluate_views(
         (forward, edge("b", "a", reverse)), (typing, probable, reverse), ()
     )
-    assert views.structural.findings[0].certainty == "definite"
-    assert views.non_typing.findings[0].certainty == "possible"
-    assert views.non_typing.findings[0].definite_members == ()
+    assert views["structural"].findings[0].finding.certainty == "definite"
+    assert views["non-typing"].findings[0].finding.certainty == "possible"
+    assert views["non-typing"].findings[0].finding.definite_members == ()
 
 
 def test_local_import_fix_changes_module_body_view_only():
     forward, reverse = fact("a", "b"), fact("b", "a")
     dependencies = (edge("a", "b", forward), edge("b", "a", reverse))
-    before = build_views(dependencies, (forward, reverse), ())
+    before = evaluate_views(dependencies, (forward, reverse), ())
     deferred = replace(
         forward, context=ImportContext(scope="function", in_function=True)
     )
-    after = build_views(dependencies, (deferred, reverse), ())
-    assert before.structural.dependency_count == after.structural.dependency_count == 2
+    after = evaluate_views(dependencies, (deferred, reverse), ())
     assert (
-        before.non_typing.cyclic_source_count
-        == after.non_typing.cyclic_source_count
+        before["structural"].dependency_count
+        == after["structural"].dependency_count
         == 2
     )
-    assert before.module_body.cyclic_source_count == 2
-    assert after.module_body.dependency_count == 1
-    assert after.module_body.findings == ()
+    assert (
+        before["non-typing"].cyclic_node_count
+        == after["non-typing"].cyclic_node_count
+        == 2
+    )
+    assert before["module-body"].cyclic_node_count == 2
+    assert after["module-body"].dependency_count == 1
+    assert after["module-body"].findings == ()
 
 
 def test_typing_self_loop_is_absent_from_narrower_views():
     item = fact("a", "a", context=ImportContext(typing_only=True))
-    views = build_views((edge("a", "a", item),), (item,), ())
+    views = evaluate_views((edge("a", "a", item),), (item,), ())
     assert (
-        views.structural.cyclic_source_count
-        == views.structural.cyclic_dependency_count
+        views["structural"].cyclic_node_count
+        == views["structural"].cyclic_dependency_count
         == 1
     )
-    assert views.non_typing.dependency_count == views.module_body.dependency_count == 0
+    assert (
+        views["non-typing"].dependency_count
+        == views["module-body"].dependency_count
+        == 0
+    )
 
 
 def test_unresolved_findings_follow_import_context():
@@ -122,10 +174,12 @@ def test_unresolved_findings_follow_import_context():
     unresolved = UnresolvedImport(
         "a", "missing", UnresolvedReason.MISSING_INTERNAL_TARGET, (typing.id, local.id)
     )
-    views = build_views((), (typing, local), (unresolved,))
-    assert len(views.structural.findings[0].evidence) == 2
-    assert [item.line for item in views.non_typing.findings[0].evidence] == [2]
-    assert views.module_body.findings == ()
+    views = evaluate_views((), (typing, local), (unresolved,))
+    assert len(views["structural"].findings[0].finding.evidence) == 2
+    assert [item.line for item in views["non-typing"].findings[0].finding.evidence] == [
+        2
+    ]
+    assert views["module-body"].findings == ()
 
 
 def test_public_evidence_deduplicates_aliases_but_not_locations_or_kinds():
@@ -146,11 +200,12 @@ def test_public_evidence_deduplicates_aliases_but_not_locations_or_kinds():
     unresolved = UnresolvedImport(
         "a", "b", UnresolvedReason.RELATIVE_ESCAPE, (first.id, duplicate.id, another.id)
     )
-    result = build_findings(
+    result = evaluate_views(
         (forward, edge("b", "a", reverse)),
         (first, duplicate, another, reverse),
         (unresolved,),
     )
+    result = tuple(item.finding for item in result["structural"].findings)
     displayed = next(item for item in result[0].witness if item.source == "a")
     assert [(item.line, item.resolution_kind) for item in displayed.evidence] == [
         (1, ResolutionKind.EXACT_BASE),
@@ -169,21 +224,21 @@ def test_component_details_include_nonwitness_edges_and_summary_counts():
     edges = tuple(
         edge(source, target, item) for (source, target), item in zip(pairs, facts)
     )
-    summary = build_views(edges, facts, ())
-    detail = build_views(edges, facts, (), details="component-edges")
-    view = detail.structural
+    summary = evaluate_views(edges, facts, ())
+    detail = evaluate_views(edges, facts, (), details="component-edges")
+    view = detail["structural"]
     assert view.dependency_count == 5
-    assert view.cyclic_source_count == 3
+    assert view.cyclic_node_count == 3
     assert view.cyclic_dependency_count == 4
-    cycle = view.findings[0]
+    cycle = view.findings[0].finding
     assert cycle.dependency_count == 4
     assert len(cycle.witness) == 2
     assert [(item.source, item.target) for item in cycle.dependencies] == list(
         pairs[:4]
     )
-    assert summary.structural.findings[0].dependencies is None
+    assert summary["structural"].findings[0].finding.dependencies is None
     assert (
-        build_views(
+        evaluate_views(
             tuple(reversed(edges)),
             tuple(reversed(facts)),
             (),
@@ -208,17 +263,17 @@ def test_filter_can_split_component_and_increase_findings():
     edges = tuple(
         edge(source, target, item) for (source, target), item in zip(pairs, facts)
     )
-    views = build_views(edges, facts, ())
-    assert len(views.structural.findings) == 1
-    assert len(views.non_typing.findings) == 2
+    views = evaluate_views(edges, facts, ())
+    assert len(views["structural"].findings) == 1
+    assert len(views["non-typing"].findings) == 2
     assert (
-        views.structural.cyclic_source_count
-        == views.non_typing.cyclic_source_count
+        views["structural"].cyclic_node_count
+        == views["non-typing"].cyclic_node_count
         == 4
     )
-    assert views.non_typing.cyclic_dependency_count == 4
+    assert views["non-typing"].cyclic_dependency_count == 4
 
 
 def test_unknown_detail_setting_fails_explicitly():
     with pytest.raises(ValueError, match="details"):
-        build_views((), (), (), details="all-cycles")
+        evaluate_views((), (), (), details="all-cycles")

@@ -20,6 +20,8 @@ reports. These are mechanism tests, not project-quality measurements.
 
 Manifest findings use readable import names; the evaluator resolves the report's
 opaque source IDs through its source inventory before comparing those
-expectations. Schema, coverage status, view shape, exit code, counts and findings
+expectations. Schema 0.7 finding envelopes are unwrapped for these independently
+maintained semantic expectations. Exact view IDs retain their hyphens.
+Schema, coverage status, view shape, exit code, counts and findings
 are checked separately. Source evidence and cycle witness closure receive
 additional pytest checks.

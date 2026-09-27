@@ -15,8 +15,8 @@ import json
 from statistics import median
 from time import perf_counter
 
-from pyarchgraph.discovery import _remove_ambiguous_groups
-from pyarchgraph.model import SourceModule
+from pyarchgraph.adapters.discovery import FileSystemSourceDiscovery
+from pyarchgraph.domain.model import SourceModule
 
 
 def _inventory(count: int, case: str) -> tuple[SourceModule, ...]:
@@ -77,7 +77,9 @@ def main() -> None:
         samples = []
         for _ in range(args.repeats):
             started = perf_counter()
-            retained, diagnostics = _remove_ambiguous_groups(candidates)
+            retained, diagnostics = (
+                FileSystemSourceDiscovery()._remove_ambiguous_groups(candidates)
+            )
             samples.append(perf_counter() - started)
             if retained != candidates or diagnostics:
                 raise RuntimeError(

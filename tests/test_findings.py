@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from pyarchgraph import analyse
+from pyarchgraph.composition import ApplicationFactory
+from pyarchgraph.domain.model import AnalysisOptions
 
 
 def _write(root: Path, files: dict[str, str]) -> None:
@@ -29,7 +30,8 @@ def _cycles(report):
                 for edge in finding.witness
             ),
         )
-        for finding in report.views.structural.findings
+        for registered in report.views["structural"].findings
+        for finding in (registered.finding,)
         if finding.kind == "cycle"
     ]
 
@@ -54,11 +56,15 @@ def test_definite_cycle_has_one_closed_witness_with_import_locations(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     _write(tmp_path, {"a.py": "# consumer\nimport b\n", "b.py": "import a\n"})
-    report = analyse((tmp_path,))
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     (cycle,) = _cycles(report)
     assert cycle.certainty == "definite"
     assert cycle.members == cycle.definite_members == ("a", "b")
-    assert len(report.sources) == report.views.structural.dependency_count == 2
+    assert len(report.sources) == report.views["structural"].dependency_count == 2
     _assert_closed_witness(cycle)
     assert {
         (edge.source, evidence.path, evidence.line, evidence.column)
@@ -76,7 +82,11 @@ def test_shadowable_child_cycle_is_possible(tmp_path: Path) -> None:
             "pkg/b.py": "import pkg.a\n",
         },
     )
-    (cycle,) = _cycles(analyse((tmp_path,)))
+    (cycle,) = _cycles(
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     assert cycle.certainty == "possible"
     assert cycle.definite_members == ()
     _assert_closed_witness(cycle)
@@ -97,7 +107,11 @@ def test_mixed_component_prefers_definite_witness(tmp_path: Path) -> None:
             "pkg/c.py": "import pkg.b\n",
         },
     )
-    (cycle,) = _cycles(analyse((tmp_path,)))
+    (cycle,) = _cycles(
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     assert cycle.members == ("pkg.a", "pkg.b", "pkg.c")
     assert cycle.definite_members == ("pkg.a", "pkg.b")
     assert cycle.certainty == "definite"
@@ -117,7 +131,11 @@ def test_bow_tie_witness_does_not_claim_to_visit_entire_component(
         tmp_path,
         {"a.py": "import b\n", "b.py": "import a\nimport c\n", "c.py": "import b\n"},
     )
-    (cycle,) = _cycles(analyse((tmp_path,)))
+    (cycle,) = _cycles(
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     assert cycle.members == ("a", "b", "c")
     assert len(cycle.witness) == 2
     _assert_closed_witness(cycle)
@@ -134,7 +152,11 @@ def test_dense_components_each_have_one_bounded_witness(tmp_path: Path) -> None:
             for name in group
         },
     )
-    cycles = _cycles(analyse((tmp_path,)))
+    cycles = _cycles(
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     assert [c.members for c in cycles] == [tuple("abcdef"), tuple("xyz")]
     for cycle in cycles:
         _assert_closed_witness(cycle)
@@ -142,7 +164,11 @@ def test_dense_components_each_have_one_bounded_witness(tmp_path: Path) -> None:
 
 def test_self_import_has_one_edge_witness(tmp_path: Path) -> None:
     _write(tmp_path, {"a.py": "import a\n"})
-    (cycle,) = _cycles(analyse((tmp_path,)))
+    (cycle,) = _cycles(
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     assert cycle.members == cycle.definite_members == ("a",)
     assert len(cycle.witness) == 1
     _assert_closed_witness(cycle)
@@ -160,10 +186,14 @@ def test_self_import_has_one_edge_witness(tmp_path: Path) -> None:
 )
 def test_local_and_typing_only_cycles_always_block(tmp_path: Path, source: str) -> None:
     _write(tmp_path, {"a.py": source, "b.py": "import a\n"})
-    report = analyse((tmp_path,))
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     (cycle,) = _cycles(report)
     assert cycle.certainty == "definite"
-    assert report.views.structural.dependency_count == 2
+    assert report.views["structural"].dependency_count == 2
     _assert_closed_witness(cycle)
 
 
@@ -177,8 +207,12 @@ def test_duplicate_import_sites_preserved_without_counting_extra_edges(
             "b.py": "import a\n",
         },
     )
-    report = analyse((tmp_path,))
-    assert report.views.structural.dependency_count == 2
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
+    assert report.views["structural"].dependency_count == 2
     (cycle,) = _cycles(report)
     edge = next(edge for edge in cycle.witness if edge.source == "a")
     assert {e.line for e in edge.evidence} == {3, 5, 6}
@@ -193,9 +227,13 @@ def test_acyclic_probable_dependency_passes(tmp_path: Path) -> None:
             "pkg/b.py": "",
         },
     )
-    report = analyse((tmp_path,))
-    assert report.views.structural.dependency_count == 1
-    assert report.views.structural.findings == ()
+    report = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
+    assert report.views["structural"].dependency_count == 1
+    assert report.views["structural"].findings == ()
 
 
 def test_exact_support_makes_possible_cycle_definite(tmp_path: Path) -> None:
@@ -207,17 +245,25 @@ def test_exact_support_makes_possible_cycle_definite(tmp_path: Path) -> None:
             "pkg/b.py": "import pkg.a\n",
         },
     )
-    before = analyse((tmp_path,))
+    before = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     (possible,) = _cycles(before)
     assert possible.certainty == "possible"
     assert possible.definite_members == ()
 
     (tmp_path / "pkg/a.py").write_text("from pkg import b\nimport pkg.b\n")
-    after = analyse((tmp_path,))
+    after = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     (definite,) = _cycles(after)
     assert (
-        before.views.structural.dependency_count
-        == after.views.structural.dependency_count
+        before.views["structural"].dependency_count
+        == after.views["structural"].dependency_count
         == 2
     )
     assert definite.certainty == "definite"
@@ -234,9 +280,17 @@ def test_blank_lines_preserve_semantic_findings_and_update_locations(
     tmp_path: Path,
 ) -> None:
     _write(tmp_path, {"a.py": "import b\n", "b.py": "import a\n"})
-    before = analyse((tmp_path,))
+    before = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     _write(tmp_path, {"a.py": "\n\nimport b\n", "b.py": "\nimport a\n"})
-    after = analyse((tmp_path,))
+    after = (
+        ApplicationFactory()
+        .create_analyzer()
+        .analyse((tmp_path,), options=AnalysisOptions())
+    )
     assert [
         (f.kind, f.certainty, [(e.source, e.target) for e in f.witness])
         for f in _cycles(before)

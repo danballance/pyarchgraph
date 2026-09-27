@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from pyarchgraph.cli import main
+from pyarchgraph.composition import ApplicationFactory
 
 
 def _write(root: Path, files: dict[str, str]) -> None:
@@ -29,10 +29,10 @@ def test_complete_analysis_prints_only_json_and_generates_no_files(
 ) -> None:
     _write(tmp_path, files)
     before = set(tmp_path.rglob("*"))
-    assert main([str(tmp_path)]) == expected
+    assert ApplicationFactory().create_cli().run([str(tmp_path)]) == expected
     output = capsys.readouterr()
     document = json.loads(output.out)
-    assert document["schema_version"] == "0.6"
+    assert document["schema_version"] == "0.7"
     assert bool(document["views"]["structural"]["findings"]) == bool(expected)
     assert output.err == ""
     assert output.out.endswith("\n")
@@ -52,14 +52,14 @@ def test_analysis_errors_return_two_with_partial_json(
     tmp_path: Path, capsys, files: dict[str, str]
 ) -> None:
     _write(tmp_path, files)
-    assert main([str(tmp_path)]) == 2
+    assert ApplicationFactory().create_cli().run([str(tmp_path)]) == 2
     output = capsys.readouterr()
     assert json.loads(output.out)["status"] == "incomplete"
     assert output.err == ""
 
 
 def test_nonexistent_source_is_an_error(tmp_path: Path, capsys) -> None:
-    assert main([str(tmp_path / "missing")]) == 2
+    assert ApplicationFactory().create_cli().run([str(tmp_path / "missing")]) == 2
     output = capsys.readouterr()
     assert output.out == ""
     assert output.err
@@ -67,7 +67,7 @@ def test_nonexistent_source_is_an_error(tmp_path: Path, capsys) -> None:
 
 def test_file_source_root_is_an_error(tmp_path: Path, capsys) -> None:
     _write(tmp_path, {"a.py": ""})
-    assert main([str(tmp_path / "a.py")]) == 2
+    assert ApplicationFactory().create_cli().run([str(tmp_path / "a.py")]) == 2
     assert capsys.readouterr().out == ""
 
 
@@ -82,7 +82,12 @@ def test_exclusions_are_repeatable_and_applied_before_parsing(
             "generated/bad.py": "invalid ! source",
         },
     )
-    assert main([str(tmp_path), "--exclude", "bad.py", "--exclude", "generated"]) == 0
+    assert (
+        ApplicationFactory()
+        .create_cli()
+        .run([str(tmp_path), "--exclude", "bad.py", "--exclude", "generated"])
+        == 0
+    )
     assert len(json.loads(capsys.readouterr().out)["sources"]) == 1
 
 
@@ -110,21 +115,21 @@ def test_exclusions_are_repeatable_and_applied_before_parsing(
 def test_removed_options_are_rejected(tmp_path: Path, capsys, flag: str) -> None:
     _write(tmp_path, {"a.py": ""})
     with pytest.raises(SystemExit) as error:
-        main([str(tmp_path), flag])
+        ApplicationFactory().create_cli().run([str(tmp_path), flag])
     assert error.value.code == 2
     assert capsys.readouterr().out == ""
 
 
 def test_source_root_is_required(capsys) -> None:
     with pytest.raises(SystemExit) as error:
-        main([])
+        ApplicationFactory().create_cli().run([])
     assert error.value.code == 2
     assert capsys.readouterr().out == ""
 
 
 def test_help_describes_only_the_small_cli(capsys) -> None:
     with pytest.raises(SystemExit) as error:
-        main(["--help"])
+        ApplicationFactory().create_cli().run(["--help"])
     assert error.value.code == 0
     help_text = capsys.readouterr().out
     assert "--exclude" in help_text
