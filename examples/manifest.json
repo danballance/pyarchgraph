@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "description": "Explicit acceptance expectations for 25 source-only projects and all 28 runs. Historical measurements remain in review-baseline.json; they are not the acceptance oracle.",
   "projects": [
     {
@@ -7,14 +7,14 @@
       "title": "Layered order service",
       "category": "good",
       "intent": "Four legitimate layers form an acyclic graph with three direct dependencies.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
         "module_count": 4,
         "dependency_count": 3,
-        "findings": []
+        "findings": [],
+        "status": "complete"
       },
       "structural": {
         "absent_dependencies": [
@@ -23,21 +23,27 @@
             "repository"
           ]
         ]
-      }
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "ports_and_adapters",
       "title": "Notification ports and adapters",
       "category": "good",
       "intent": "The workflow depends on a narrow delivery protocol. Composition selects an email adapter; the domain and the protocol do not import infrastructure.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
         "module_count": 5,
         "dependency_count": 6,
-        "findings": []
+        "findings": [],
+        "status": "complete"
       },
       "structural": {
         "required_dependencies": [
@@ -60,14 +66,19 @@
             "email_adapter"
           ]
         ]
-      }
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "definite_cycle",
       "title": "Order and inventory cycle",
       "category": "failure",
       "intent": "Two exact module imports form a definite cycle. The cycle must remain a finding regardless of unrelated connected code or tests.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -87,15 +98,21 @@
               "orders"
             ]
           }
-        ]
-      }
+        ],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "self_import",
       "title": "Registry imports itself",
       "category": "failure",
       "intent": "A module importing itself is a cyclic component of size one and needs a bounded witness.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -113,15 +130,21 @@
               "registry"
             ]
           }
-        ]
-      }
+        ],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "cycle_with_independent_pair",
       "title": "Cycle plus an unrelated feature",
       "category": "control",
       "intent": "An unrelated receipt-to-currency dependency must not conceal the original two-module cycle.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -141,15 +164,21 @@
               "orders"
             ]
           }
-        ]
-      }
+        ],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "cycle_with_49_pairs",
       "title": "Cycle diluted by 49 independent pairs",
       "category": "control",
       "intent": "Forty-nine unrelated one-way pairs must not conceal the original two-module cycle.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -169,15 +198,21 @@
               "orders"
             ]
           }
-        ]
-      }
+        ],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "cycle_with_test_padding",
       "title": "Cycle diluted by test consumers",
       "category": "control",
       "intent": "One hundred test consumers are always excluded. Both runs must report the same two production modules and the unchanged cycle.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -197,12 +232,12 @@
               "orders"
             ]
           }
-        ]
+        ],
+        "status": "complete"
       },
       "variants": [
         {
           "id": "production_only",
-          "source_root": ".",
           "exclusions": [
             "tests/**"
           ],
@@ -224,17 +259,29 @@
                   "orders"
                 ]
               }
-            ]
-          }
+            ],
+            "status": "complete"
+          },
+          "source_roots": [
+            "."
+          ],
+          "gate": "structural",
+          "details": "summary",
+          "config": null
         }
-      ]
+      ],
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "cycle_with_isolated_modules",
       "title": "Unused files cannot dilute the cycle",
       "category": "control",
       "intent": "Unrelated isolated modules must not conceal the original two-module cycle.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -254,37 +301,50 @@
               "orders"
             ]
           }
-        ]
-      }
+        ],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "dense_ordered_dag",
       "title": "Six direct edges with the same reachability",
       "category": "good",
       "intent": "Six direct dependencies among four modules remain acyclic and produce no findings.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
         "module_count": 4,
         "dependency_count": 6,
-        "findings": []
-      }
+        "findings": [],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "spelling_relative",
       "title": "Equivalent package imports: relative",
       "category": "warning",
       "intent": "The package re-exports a, and a uses b.VALUE. Relative from-import and absolute submodule spelling must yield the same architectural dependencies. Package initialization syntax remains as evidence.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
         "module_count": 3,
         "dependency_count": 2,
-        "findings": []
+        "findings": [],
+        "status": "complete"
       },
       "structural": {
         "required_dependencies": [
@@ -297,21 +357,27 @@
             "pkg.b"
           ]
         ]
-      }
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "spelling_absolute",
       "title": "Equivalent package imports: absolute",
       "category": "warning",
       "intent": "The package re-exports a, and a uses b.VALUE. Relative from-import and absolute submodule spelling must yield the same architectural dependencies. Package initialization syntax remains as evidence.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
         "module_count": 3,
         "dependency_count": 2,
-        "findings": []
+        "findings": [],
+        "status": "complete"
       },
       "structural": {
         "required_dependencies": [
@@ -324,14 +390,19 @@
             "pkg.b"
           ]
         ]
-      }
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "shadowed_package_attribute",
       "title": "An attribute shadows a child-module candidate",
       "category": "warning",
       "intent": "A child module shadowed by a package attribute creates a possible cycle, which must still block a pass.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -348,15 +419,21 @@
             ],
             "definite_members": []
           }
-        ]
-      }
+        ],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "type_only_cycle",
       "title": "Type-only mutual references",
       "category": "warning",
       "intent": "Typing-only dependencies remain structural and the cycle must fail.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -376,15 +453,59 @@
               "orders"
             ]
           }
-        ]
-      }
+        ],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null,
+      "variants": [
+        {
+          "id": "non-typing",
+          "source_roots": [
+            "."
+          ],
+          "exclusions": [],
+          "gate": "non-typing",
+          "details": "summary",
+          "config": null,
+          "expected": {
+            "outcome": "pass",
+            "exit_code": 0,
+            "module_count": 2,
+            "dependency_count": 0,
+            "findings": [],
+            "status": "complete"
+          }
+        },
+        {
+          "id": "module-body",
+          "source_roots": [
+            "."
+          ],
+          "exclusions": [],
+          "gate": "module-body",
+          "details": "summary",
+          "config": null,
+          "expected": {
+            "outcome": "pass",
+            "exit_code": 0,
+            "module_count": 2,
+            "dependency_count": 0,
+            "findings": [],
+            "status": "complete"
+          }
+        }
+      ]
     },
     {
       "id": "local_import_cycle",
       "title": "Function-local mutual imports",
       "category": "warning",
       "intent": "Function-local dependencies remain structural and the cycle must fail.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -404,15 +525,72 @@
               "report"
             ]
           }
-        ]
-      }
+        ],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null,
+      "variants": [
+        {
+          "id": "non-typing",
+          "source_roots": [
+            "."
+          ],
+          "exclusions": [],
+          "gate": "non-typing",
+          "details": "summary",
+          "config": null,
+          "expected": {
+            "outcome": "fail",
+            "exit_code": 1,
+            "module_count": 2,
+            "dependency_count": 2,
+            "findings": [
+              {
+                "kind": "cycle",
+                "certainty": "definite",
+                "members": [
+                  "cache",
+                  "report"
+                ],
+                "definite_members": [
+                  "cache",
+                  "report"
+                ]
+              }
+            ],
+            "status": "complete"
+          }
+        },
+        {
+          "id": "module-body",
+          "source_roots": [
+            "."
+          ],
+          "exclusions": [],
+          "gate": "module-body",
+          "details": "summary",
+          "config": null,
+          "expected": {
+            "outcome": "pass",
+            "exit_code": 0,
+            "module_count": 2,
+            "dependency_count": 0,
+            "findings": [],
+            "status": "complete"
+          }
+        }
+      ]
     },
     {
       "id": "mixed_import_evidence",
       "title": "Ordinary and type-only evidence for one edge",
       "category": "failure",
       "intent": "Ordinary and typing-only imports of the same target retain both evidence sites but count as one dependency.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -432,15 +610,21 @@
               "service"
             ]
           }
-        ]
-      }
+        ],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "src_root_hazard",
       "title": "A source-layout cycle and its incorrect root",
       "category": "failure",
       "intent": "The real cycle is visible from src; selecting the repository directory instead is an analysis error.",
-      "source_root": "src",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -460,27 +644,44 @@
               "pkg.b"
             ]
           }
-        ]
+        ],
+        "status": "complete"
       },
       "variants": [
         {
           "id": "incorrect_repository_root",
-          "source_root": ".",
           "exclusions": [],
           "expected": {
             "outcome": "error",
             "exit_code": 2,
-            "error_contains": "source_root_mismatch"
-          }
+            "status": "incomplete",
+            "module_count": 3,
+            "dependency_count": 0,
+            "findings": [],
+            "diagnostics": [
+              "source_root_mismatch"
+            ]
+          },
+          "source_roots": [
+            "."
+          ],
+          "gate": "structural",
+          "details": "summary",
+          "config": null
         }
-      ]
+      ],
+      "source_roots": [
+        "src"
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "missing_internal_target",
       "title": "A missing regular-package module",
       "category": "failure",
       "intent": "A source-backed package imports a nonexistent sibling. Parsing can be complete while internal dependency knowledge is incomplete, so missing targets must remain explicit.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -494,22 +695,29 @@
             "requested": "catalog.storage",
             "code": "missing_internal_target"
           }
-        ]
-      }
+        ],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "valid_namespace_package",
       "title": "A valid namespace-package import",
       "category": "warning",
       "intent": "There are deliberately no __init__.py files. The reader is a real namespace-package submodule; an unmodelled namespace base is different from a missing internal target.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
         "module_count": 2,
         "dependency_count": 1,
-        "findings": []
+        "findings": [],
+        "status": "complete"
       },
       "structural": {
         "required_dependencies": [
@@ -518,21 +726,27 @@
             "plugins.readers.csv_reader"
           ]
         ]
-      }
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "dynamic_literal",
       "title": "Direct literal dynamic imports",
       "category": "warning",
       "intent": "Dynamic calls with literal targets produce no dependencies or findings. The explicit plugin-to-loader import remains, but the dynamic return relationship is outside coverage.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
         "module_count": 2,
         "dependency_count": 1,
-        "findings": []
+        "findings": [],
+        "status": "complete"
       },
       "structural": {
         "absent_dependencies": [
@@ -547,21 +761,27 @@
             "loader"
           ]
         ]
-      }
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "dynamic_aliases",
       "title": "Aliased dynamic import functions",
       "category": "warning",
       "intent": "Aliased dynamic calls produce no dependencies or findings. Explicit importlib imports are still collected as external imports.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
         "module_count": 2,
         "dependency_count": 0,
-        "findings": []
+        "findings": [],
+        "status": "complete"
       },
       "structural": {
         "absent_dependencies": [
@@ -570,21 +790,27 @@
             "plugin"
           ]
         ]
-      }
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "dynamic_nonliteral",
       "title": "Configuration-selected dynamic imports",
       "category": "warning",
       "intent": "Runtime-selected dynamic calls produce no dependencies or findings. Explicit importlib imports are still collected as external imports; dynamically introduced dependencies are outside coverage.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
         "module_count": 2,
         "dependency_count": 0,
-        "findings": []
+        "findings": [],
+        "status": "complete"
       },
       "structural": {
         "absent_dependencies": [
@@ -593,14 +819,19 @@
             "plugin"
           ]
         ]
-      }
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "scc_not_simple_cycle",
       "title": "A three-module component with two-node cycles",
       "category": "failure",
       "intent": "Editor and history each depend on events, while events depends on both. The SCC has three modules, but the longest simple cycle has two: component size must not be labelled cycle length.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -622,15 +853,21 @@
               "history"
             ]
           }
-        ]
-      }
+        ],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "dense_cyclic_component",
       "title": "Many simple cycles, one bounded finding",
       "category": "failure",
       "intent": "Five modules all import one another. Report one bounded witness for the cyclic component instead of enumerating all simple cycles.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -656,22 +893,29 @@
               "gamma"
             ]
           }
-        ]
-      }
+        ],
+        "status": "complete"
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "legitimate_package_reexport",
       "title": "A public package re-export",
       "category": "good",
       "intent": "The application consumes a public class through a package initializer. Keeping app -> toolkit and toolkit -> toolkit.models preserves a real dependency; removing every package edge would erase it.",
-      "source_root": ".",
       "exclusions": [],
       "expected": {
         "outcome": "pass",
         "exit_code": 0,
         "module_count": 3,
         "dependency_count": 2,
-        "findings": []
+        "findings": [],
+        "status": "complete"
       },
       "structural": {
         "required_dependencies": [
@@ -684,14 +928,19 @@
             "toolkit.models"
           ]
         ]
-      }
+      },
+      "source_roots": [
+        "."
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
     },
     {
       "id": "location_only_edit",
       "title": "Stable violation identity after whitespace edits",
       "category": "control",
       "intent": "Comments and blank lines change evidence locations without changing semantic findings.",
-      "source_root": "before",
       "exclusions": [],
       "expected": {
         "outcome": "fail",
@@ -711,12 +960,12 @@
               "orders"
             ]
           }
-        ]
+        ],
+        "status": "complete"
       },
       "variants": [
         {
           "id": "after_documentation_edit",
-          "source_root": "after",
           "exclusions": [],
           "expected": {
             "outcome": "fail",
@@ -736,10 +985,223 @@
                   "orders"
                 ]
               }
+            ],
+            "status": "complete"
+          },
+          "source_roots": [
+            "after"
+          ],
+          "gate": "structural",
+          "details": "summary",
+          "config": null
+        }
+      ],
+      "source_roots": [
+        "before"
+      ],
+      "gate": "structural",
+      "details": "summary",
+      "config": null
+    },
+    {
+      "id": "multiple_roots",
+      "source_roots": [
+        ".",
+        "src"
+      ],
+      "exclusions": [],
+      "gate": "structural",
+      "details": "summary",
+      "config": null,
+      "expected": {
+        "outcome": "fail",
+        "exit_code": 1,
+        "status": "complete",
+        "module_count": 2,
+        "dependency_count": 2,
+        "findings": [
+          {
+            "kind": "cycle",
+            "certainty": "definite",
+            "members": [
+              "api",
+              "main"
+            ],
+            "definite_members": [
+              "api",
+              "main"
             ]
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "unusual_sources",
+      "source_roots": [
+        "."
+      ],
+      "exclusions": [],
+      "gate": "structural",
+      "details": "summary",
+      "config": null,
+      "expected": {
+        "outcome": "pass",
+        "exit_code": 0,
+        "status": "complete",
+        "module_count": 4,
+        "dependency_count": 3,
+        "findings": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "partial_analysis",
+      "source_roots": [
+        "."
+      ],
+      "exclusions": [],
+      "gate": "structural",
+      "details": "summary",
+      "config": null,
+      "expected": {
+        "outcome": "error",
+        "exit_code": 2,
+        "status": "incomplete",
+        "module_count": 3,
+        "dependency_count": 2,
+        "findings": [
+          {
+            "kind": "cycle",
+            "certainty": "definite",
+            "members": [
+              "a",
+              "b"
+            ],
+            "definite_members": [
+              "a",
+              "b"
+            ]
+          }
+        ],
+        "diagnostics": [
+          "source_syntax_error"
+        ]
+      }
+    },
+    {
+      "id": "shared_namespace",
+      "source_roots": [
+        "."
+      ],
+      "exclusions": [],
+      "gate": "structural",
+      "details": "summary",
+      "config": null,
+      "expected": {
+        "outcome": "fail",
+        "exit_code": 1,
+        "status": "complete",
+        "module_count": 3,
+        "dependency_count": 1,
+        "findings": [
+          {
+            "kind": "unresolved_import",
+            "requested": "google.service.missing",
+            "code": "missing_internal_target"
+          }
+        ],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "implementation_boundary",
+      "source_roots": [
+        "."
+      ],
+      "exclusions": [],
+      "gate": "structural",
+      "details": "summary",
+      "config": null,
+      "expected": {
+        "outcome": "error",
+        "exit_code": 2,
+        "status": "incomplete",
+        "module_count": 2,
+        "dependency_count": 0,
+        "findings": [],
+        "diagnostics": []
+      },
+      "variants": [
+        {
+          "id": "acknowledged",
+          "source_roots": [
+            "."
+          ],
+          "exclusions": [],
+          "gate": "structural",
+          "details": "summary",
+          "config": "accepted.toml",
+          "expected": {
+            "outcome": "pass",
+            "exit_code": 0,
+            "status": "complete",
+            "module_count": 2,
+            "dependency_count": 0,
+            "findings": [],
+            "diagnostics": []
+          }
+        },
+        {
+          "id": "filtered_unacknowledged",
+          "source_roots": [
+            "."
+          ],
+          "exclusions": [],
+          "gate": "module-body",
+          "details": "summary",
+          "config": null,
+          "expected": {
+            "outcome": "error",
+            "exit_code": 2,
+            "status": "incomplete",
+            "module_count": 2,
+            "dependency_count": 0,
+            "findings": [],
+            "diagnostics": []
           }
         }
       ]
+    },
+    {
+      "id": "ordinary_self_from",
+      "source_roots": [
+        "."
+      ],
+      "exclusions": [],
+      "gate": "structural",
+      "details": "summary",
+      "config": null,
+      "expected": {
+        "outcome": "fail",
+        "exit_code": 1,
+        "status": "complete",
+        "module_count": 1,
+        "dependency_count": 1,
+        "findings": [
+          {
+            "kind": "cycle",
+            "certainty": "definite",
+            "members": [
+              "registry"
+            ],
+            "definite_members": [
+              "registry"
+            ]
+          }
+        ],
+        "diagnostics": []
+      }
     }
   ]
 }

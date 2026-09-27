@@ -1,112 +1,25 @@
-# Dependency scenarios
+# Architecture acceptance corpus
 
-The 25 projects under `projects/` are committed source fixtures covering clean
-architecture, cycles, and explicit import resolution. The test harness reads
-their source; it never imports or executes the applications.
+Run `uv run python -m examples.evaluate` from the repository root. The evaluator
+checks 40 real CLI invocations over 31 small projects against independently
+specified expectations in `manifest.json` (manifest schema 3). It never executes
+fixture application code.
 
-[manifest.json](manifest.json) defines all 28 runs, including source roots,
-exclusions, expected exit codes, module/dependency counts, and findings. Every
-variant has a complete configuration. The three variants exercise explicit test
-exclusion, an incorrect source root, and a documentation edit that moves import
-locations.
+The original 25 projects preserve their source bytes and archival hashes in
+`review-baseline.json`. Their original structural expectations remain, with the
+wrong-root scenario now returning an incomplete JSON report. Four extra view
+variants exercise the existing typing-only and deferred-import cycles.
 
-Run the acceptance tests and print the complete expected/actual matrix:
+Six new projects cover multiple roots, unusual source filenames, partial analysis,
+shared namespace ownership, acknowledged native implementation boundaries and
+ordinary-module `from` self-imports. Native boundaries include both an accepted
+variant and a filtered-gate variant that remains incomplete.
 
-```sh
-.venv/bin/python -m pytest tests/test_examples.py -q
-.venv/bin/python -m examples.evaluate
-```
+The 40 expected outcomes are 15 passes, 21 findings reports and four incomplete
+reports. These are mechanism tests, not project-quality measurements.
 
-The evaluator runs the actual CLI for every scenario. It exits successfully
-only when every result matches the manifest: a fixture designed to fail is a
-successful acceptance check when it produces the expected failure. Unexpected
-findings, missing findings, changed certainty/counts, invalid output, and wrong
-exit codes fail validation. Add `--json` for machine-readable results or repeat
-`--project NAME` to select projects:
-
-```sh
-.venv/bin/python -m examples.evaluate --project spelling_relative --project spelling_absolute --json
-```
-
-A single scenario can also be checked directly:
-
-```sh
-.venv/bin/python -m pyarchgraph examples/projects/src_root_hazard/src
-.venv/bin/python -m pyarchgraph examples/projects/dense_ordered_dag
-```
-
-Reports go to stdout. Exit `0` means no blocking findings; exit `1` means
-findings require attention. Exit `2` is an analysis/configuration error with an
-explanation on stderr and no partial JSON report.
-
-## Expected scenarios
-
-| Project | Expected result |
-| --- | --- |
-| `layered_service` | Pass: four legitimate layers form an acyclic graph. |
-| `ports_and_adapters` | Pass: the workflow consumes a protocol; composition selects infrastructure. |
-| `definite_cycle` | Fail: two exact imports form a definite cycle. |
-| `self_import` | Fail: one module imports itself, with a one-edge witness. |
-| `cycle_with_independent_pair` | Fail: an unrelated feature cannot conceal the original cycle. |
-| `cycle_with_49_pairs` | Fail: 49 unrelated dependency pairs cannot conceal the original cycle. |
-| `cycle_with_test_padding` | Fail in both runs: tests are always excluded, leaving two modules and two dependencies. |
-| `cycle_with_isolated_modules` | Fail: isolated modules cannot conceal the original cycle. |
-| `dense_ordered_dag` | Pass: six direct dependencies among four modules remain acyclic. |
-| `spelling_relative` | Pass: relative child imports have the same architecture as the absolute spelling. |
-| `spelling_absolute` | Pass: absolute spelling produces the same dependency count. |
-| `shadowed_package_attribute` | Fail: a possible cycle remains visible without claiming it is definite. |
-| `type_only_cycle` | Fail: typing-only imports remain structural dependencies. |
-| `local_import_cycle` | Fail: function-local imports remain structural dependencies. |
-| `mixed_import_evidence` | Fail: duplicate ordinary and typing-only imports retain evidence without double-counting an edge. |
-| `src_root_hazard` | Fail from `src`; analysis error from the incorrect repository root. |
-| `missing_internal_target` | Fail: the missing internal module has an explanatory finding. |
-| `valid_namespace_package` | Pass: a valid namespace base is distinct from a missing internal target. |
-| `dynamic_literal` | Pass: dynamic calls add no edge or finding; the explicit plugin-to-loader import remains. |
-| `dynamic_aliases` | Pass: aliased dynamic calls add no edge or finding. |
-| `dynamic_nonliteral` | Pass: runtime-selected dynamic targets add no edge or finding. |
-| `scc_not_simple_cycle` | Fail: one three-module component gets one bounded witness. |
-| `dense_cyclic_component` | Fail: many simple cycles get one bounded component witness. |
-| `legitimate_package_reexport` | Pass: public package APIs retain dependencies through initializers. |
-| `location_only_edit` | Fail in both runs: documentation moves evidence lines without changing semantic findings. |
-
-The complete corpus expects **10 passes, 17 finding failures, and 1 analysis
-error**. Tests additionally check source locations, bounded cycle witnesses,
-normalization, preserved import evidence, and equivalent graphs.
-
-Every explicit import counts, including statements in functions, classes,
-conditional branches, and `TYPE_CHECKING` blocks. Calls to dynamic loaders are
-outside coverage even when their targets are literal strings. These scenarios
-therefore check the graph of explicit imports, not every possible runtime
-dependency.
-
-## Historical evidence
-
-[review-baseline.json](review-baseline.json) is the immutable snapshot from
-commit `925276dbedbc324427a619aab91a35a719e8e183`. Its old scores and policy
-measurements are archival evidence, not acceptance requirements. The acceptance
-tests verify that the committed fixture source hashes still match that snapshot.
-
-The simplified tool intentionally changes these expectations:
-
-- Numerical scores, cleanup debt, baseline comparisons, and evidence filters
-  are absent from the report and acceptance criteria.
-- Tests are always excluded, so both test-padding runs analyze exactly two
-  modules and two dependencies.
-- Possible cycles expressed through explicit imports block a pass.
-- Dynamic calls contribute no dependencies or findings; their explicit imports
-  still count.
-- A wrong source root is an analysis error, with no partial report.
-- Harmless probable child relationships and valid namespace bases can pass.
-
-## Extending the corpus
-
-Add readable source and a local explanation under `projects/<name>/`, then
-register a complete default run and any variants in the manifest. Define the
-expected behavior from the scenario before running the implementation. Keep
-structural assertions when counts alone would miss the intended relationship.
-Do not rewrite expectations to accommodate a regression, or modify sample
-applications simply to make acceptance checks pass.
-
-Preserve the historical snapshot. Any deliberate fixture update also needs a
-reviewed update to the source-integrity check; do not replace old observations
-with measurements from the new implementation.
+Manifest findings use readable import names; the evaluator resolves the report's
+opaque source IDs through its source inventory before comparing those
+expectations. Schema, coverage status, view shape, exit code, counts and findings
+are checked separately. Source evidence and cycle witness closure receive
+additional pytest checks.

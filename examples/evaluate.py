@@ -38,8 +38,19 @@ def run_cli(
     _, _, config = next(
         item for item in iter_runs([project_id]) if item[1] == variant_id
     )
-    root = EXAMPLES / "projects" / project_id / config["source_root"]
-    command = [sys.executable, "-m", "pyarchgraph", str(root)]
+    project_dir = EXAMPLES / "projects" / project_id
+    command = [
+        sys.executable,
+        "-m",
+        "pyarchgraph",
+        *(str(project_dir / root) for root in config["source_roots"]),
+        "--gate",
+        config["gate"],
+        "--details",
+        config["details"],
+    ]
+    if config["config"] is not None:
+        command.extend(["--config", str(project_dir / config["config"])])
     for pattern in config["exclusions"]:
         command.extend(["--exclude", pattern])
     return subprocess.run(
@@ -62,25 +73,43 @@ def _matches(actual: Any, expected: Any) -> bool:
         return (
             isinstance(actual, list)
             and len(actual) == len(expected)
-            and all(_matches(left, right) for left, right in zip(actual, expected))
+            and all(_matches(left, right) for left, right in zip(actual, expected, strict=True))
         )
     return actual == expected
+
+
+def semantic_view(report: dict[str, Any], view: str | None = None) -> dict[str, Any]:
+    """Translate opaque source IDs for readable, independent corpus expectations."""
+    labels = {
+        source["id"]: source["import_name"] or source["path"]
+        for source in report["sources"]
+    }
+
+    def labelled(value):
+        if isinstance(value, list):
+            return [labelled(item) for item in value]
+        if isinstance(value, dict):
+            return {
+                key: sorted(labelled(item))
+                if key in ("members", "definite_members")
+                else labelled(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, str):
+            return labels.get(value, value)
+        return value
+
+    selected = report["views"][view or report["gate"].replace("-", "_")]
+    return {"module_count": len(report["sources"]), **labelled(selected)}
 
 
 def check_result(
     completed: subprocess.CompletedProcess[str], expected: dict[str, Any]
 ) -> list[str]:
-    """Compare actual output to independent, committed acceptance expectations."""
+    """Compare the real report with independently specified expectations."""
     errors = []
     if completed.returncode != expected["exit_code"]:
         errors.append(f"exit {completed.returncode}, expected {expected['exit_code']}")
-    if expected["outcome"] == "error":
-        if completed.stdout:
-            errors.append("analysis error emitted stdout")
-        if expected["error_contains"] not in completed.stderr:
-            errors.append(f"stderr must contain {expected['error_contains']!r}")
-        return errors
-
     if completed.stderr:
         errors.append(f"unexpected stderr: {completed.stderr.strip()}")
     try:
@@ -89,19 +118,30 @@ def check_result(
         return [*errors, "stdout is not a JSON report"]
     if not isinstance(report, dict) or set(report) != {
         "schema_version",
-        "module_count",
-        "dependency_count",
-        "findings",
+        "status",
+        "gate",
+        "sources",
+        "coverage",
+        "views",
     }:
         return [*errors, "report has an invalid top-level contract"]
-    if report["schema_version"] != "0.5":
-        errors.append("schema_version must be '0.5'")
+    if report["schema_version"] != "0.6":
+        errors.append("schema_version must be '0.6'")
+    if report["status"] != expected["status"]:
+        errors.append(
+            f"status is {report['status']!r}, expected {expected['status']!r}"
+        )
+    if set(report["views"]) != {"structural", "non_typing", "module_body"}:
+        return [*errors, "report must contain exactly the three graph views"]
+    actual_codes = {item["code"] for item in report["coverage"]["diagnostics"]}
+    for code in expected.get("diagnostics", []):
+        if code not in actual_codes:
+            errors.append(f"missing coverage diagnostic {code}")
+    semantic = semantic_view(report)
     for field in ("module_count", "dependency_count"):
-        if type(report[field]) is not int or report[field] != expected[field]:
-            errors.append(f"{field} is {report[field]!r}, expected {expected[field]}")
-    if not isinstance(report["findings"], list):
-        return [*errors, "findings must be a list"]
-    remaining = list(report["findings"])
+        if type(semantic[field]) is not int or semantic[field] != expected[field]:
+            errors.append(f"{field} is {semantic[field]!r}, expected {expected[field]}")
+    remaining = list(semantic["findings"])
     for finding in expected["findings"]:
         for index, actual in enumerate(remaining):
             if _matches(actual, finding):
@@ -167,7 +207,7 @@ def main() -> int:
         widths = [max(len(row[column]) for row in table) for column in range(4)]
         print(f"Architecture corpus: {len(report['results'])} runs")
         for row in table:
-            print("  ".join(value.ljust(width) for value, width in zip(row, widths)))
+            print("  ".join(value.ljust(width) for value, width in zip(row, widths, strict=True)))
         for row in report["results"]:
             for error in row["errors"]:
                 print(f"{row['project']}/{row['variant'] or 'default'}: {error}")
