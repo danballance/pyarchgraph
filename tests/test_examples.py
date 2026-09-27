@@ -6,6 +6,7 @@ import ast
 import hashlib
 import json
 import subprocess
+from dataclasses import replace
 from functools import cache
 from pathlib import Path
 
@@ -39,20 +40,58 @@ def _completed(project_id, variant_id=None):
 
 
 def _report(project_id, variant_id=None):
-    return json.loads(_completed(project_id, variant_id).stdout)
+    return evaluate.semantic_view(json.loads(_completed(project_id, variant_id).stdout))
 
 
 @cache
 def _structure(project_id, variant_id=None):
     """Inspect engine output without expanding the deliberately small public API."""
     config = _configuration(project_id, variant_id)
-    root = EXAMPLES / "projects" / project_id / config["source_root"]
+    if len(config["source_roots"]) > 1:
+        from pyarchgraph import AnalysisOptions, analyse
+
+        roots = tuple(
+            EXAMPLES / "projects" / project_id / root for root in config["source_roots"]
+        )
+        report = analyse(roots, options=AnalysisOptions(details="component-edges"))
+        labels = {
+            source.id: source.import_name or source.path for source in report.sources
+        }
+        edges = tuple(
+            replace(edge, source=labels[edge.source], target=labels[edge.target])
+            for finding in report.views.structural.findings
+            if finding.kind == "cycle"
+            for edge in finding.dependencies
+        )
+        return None, None, edges
+    root = EXAMPLES / "projects" / project_id / config["source_roots"][0]
     discovery = discover_modules(root, excludes=tuple(config["exclusions"]))
     collection = AstImportFactSource().collect(root, discovery.modules)
     resolution = resolve_imports(
         collection.facts, discovery.modules, discovery.namespace_prefixes
     )
-    return collection, resolution, architecture_dependencies(resolution.dependencies)
+    labels = {
+        module.id: module.import_name or module.path for module in discovery.modules
+    }
+
+    def labelled_edge(edge):
+        return replace(edge, source=labels[edge.source], target=labels[edge.target])
+
+    selected = tuple(
+        labelled_edge(edge)
+        for edge in architecture_dependencies(resolution.dependencies)
+    )
+    collection = replace(
+        collection,
+        facts=tuple(
+            replace(fact, source=labels[fact.source]) for fact in collection.facts
+        ),
+    )
+    resolution = replace(
+        resolution,
+        dependencies=tuple(labelled_edge(edge) for edge in resolution.dependencies),
+    )
+    return collection, resolution, selected
 
 
 def _pairs(project_id, variant_id=None):
@@ -76,6 +115,7 @@ def _assert_evidence(evidence, project_id):
         "column",
         "source_segment",
         "resolution_kind",
+        "context",
     }
     assert not Path(evidence["path"]).is_absolute()
     source_path = evaluate.REPOSITORY / evidence["path"]
@@ -103,6 +143,8 @@ def _assert_finding_contract(finding, project_id):
             "witness",
             "members",
             "definite_members",
+            "dependency_count",
+            "dependencies",
         }
         assert finding["certainty"] in {"definite", "possible"}
         assert finding["witness"]
@@ -128,22 +170,22 @@ def _assert_finding_contract(finding, project_id):
 
 
 def test_manifest_preserves_every_project_and_run():
-    assert MANIFEST["schema_version"] == 2
-    assert len(PROJECTS) == 25
-    assert len(RUNS) == 28
+    assert MANIFEST["schema_version"] == 3
+    assert len(PROJECTS) == 31
+    assert len(RUNS) == 40
     assert set(PROJECTS) == {
         path.name for path in (EXAMPLES / "projects").iterdir() if path.is_dir()
     }
-    assert set(RUNS) == {
+    assert set(RUNS) >= {
         (item["project"], item["variant"]) for item in BASELINE["observations"]
     }
     outcomes = [config["expected"]["outcome"] for _, _, config in evaluate.iter_runs()]
-    assert outcomes.count("pass") == 10
-    assert outcomes.count("fail") == 17
-    assert outcomes.count("error") == 1
+    assert outcomes.count("pass") == 15
+    assert outcomes.count("fail") == 21
+    assert outcomes.count("error") == 4
     for project_id, variant_id in RUNS:
         config = _configuration(project_id, variant_id)
-        assert config["source_root"]
+        assert config["source_roots"][0]
         assert isinstance(config["exclusions"], list)
         assert (EXAMPLES / "projects" / project_id / "README.md").is_file()
 
@@ -151,10 +193,12 @@ def test_manifest_preserves_every_project_and_run():
 def test_committed_sources_match_archival_hashes_and_parse_without_execution():
     files = sorted((EXAMPLES / "projects").rglob("*.py"))
     assert len(files) >= 269
-    assert {path.relative_to(EXAMPLES).as_posix() for path in files} == set(
+    assert {path.relative_to(EXAMPLES).as_posix() for path in files} >= set(
         BASELINE["source_sha256"]
     )
     for path in files:
+        if path.relative_to(EXAMPLES).as_posix() not in BASELINE["source_sha256"]:
+            continue
         source = path.read_bytes()
         assert (
             hashlib.sha256(source).hexdigest()
@@ -337,7 +381,9 @@ def test_missing_targets_are_distinct_from_valid_namespace_bases():
         ("dynamic_nonliteral", [2, 3]),
     ],
 )
-def test_dynamic_calls_add_no_dependencies_or_findings(project_id, explicit_import_lines):
+def test_dynamic_calls_add_no_dependencies_or_findings(
+    project_id, explicit_import_lines
+):
     assert _report(project_id)["findings"] == []
     assert _completed(project_id).returncode == 0
     collection, resolution, _ = _structure(project_id)
@@ -367,13 +413,13 @@ def test_documentation_edits_preserve_semantic_findings_and_update_locations():
     assert {key: value for key, value in old_cycle.items() if key != "witness"} == {
         key: value for key, value in new_cycle.items() if key != "witness"
     }
-    for old_edge, new_edge in zip(old_cycle["witness"], new_cycle["witness"]):
+    for old_edge, new_edge in zip(old_cycle["witness"], new_cycle["witness"], strict=True):
         assert (old_edge["source"], old_edge["target"]) == (
             new_edge["source"],
             new_edge["target"],
         )
         for old_evidence, new_evidence in zip(
-            old_edge["evidence"], new_edge["evidence"]
+            old_edge["evidence"], new_edge["evidence"], strict=True
         ):
             assert new_evidence["path"] == old_evidence["path"].replace(
                 "/before/", "/after/"
@@ -397,8 +443,8 @@ def test_evaluator_rejects_changed_counts_certainty_and_extra_findings():
     completed = _completed("definite_cycle")
     expected = PROJECTS["definite_cycle"]["expected"]
     report = json.loads(completed.stdout)
-    report["module_count"] += 1
-    report["findings"][0]["certainty"] = "possible"
+    report["sources"].append({**report["sources"][0], "id": "extra-source"})
+    report["views"]["structural"]["findings"][0]["certainty"] = "possible"
     altered = subprocess.CompletedProcess(
         completed.args, completed.returncode, json.dumps(report), ""
     )

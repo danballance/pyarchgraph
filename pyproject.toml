@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyarchgraph"
-version = "0.5.1"
+version = "0.6.0"
 description = "Static Python dependency checks for cycles and unresolved imports"
 readme = "README.md"
 requires-python = ">=3.11,!=3.14.1"
@@ -29,6 +29,7 @@ packages = ["pyarchgraph"]
 include = [
   "/pyarchgraph",
   "/tests",
+  "/benchmarks",
   "/examples",
   "/docs",
   "/README.md",

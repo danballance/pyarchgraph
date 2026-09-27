@@ -1,10 +1,4 @@
-"""Frozen domain objects for a syntactic Python import dependency analysis.
-
-An edge ``A -> B`` means that module A contains import syntax that was
-statically resolved to source-backed module B.  It does not claim that the
-statement executes at runtime. Incomplete analysis raises an error instead of
-producing a partial report.
-"""
+"""Typed, deterministic reports for scoped explicit-import analysis."""
 
 from __future__ import annotations
 
@@ -12,9 +6,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
+Gate = Literal["structural", "non-typing", "module-body"]
+Details = Literal["summary", "component-edges"]
+TargetKind = Literal["stub", "native", "generated", "excluded"]
+
 
 class Severity(str, Enum):
     ERROR = "error"
+    WARNING = "warning"
+    INFO = "info"
 
 
 class ImportSyntax(str, Enum):
@@ -37,6 +37,8 @@ class UnresolvedReason(str, Enum):
     MISSING_INTERNAL_TARGET = "missing_internal_target"
     NAMESPACE_BASE_UNMODELLED = "namespace_base_unmodelled"
     RELATIVE_ESCAPE = "relative_escape"
+    UNKNOWN_PACKAGE_CONTEXT = "unknown_package_context"
+    AMBIGUOUS_TARGET = "ambiguous_target"
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +47,19 @@ class SourceModule:
     path: str
     is_package: bool
     parent_package: str | None
+    import_name: str | None = None
+    binding_status: Literal["bound", "path_only", "shadowed", "ambiguous"] = "bound"
+    analysis_status: Literal["pending", "analyzed", "error"] = "pending"
+
+
+@dataclass(frozen=True, slots=True)
+class ImportContext:
+    scope: Literal["module", "class", "function"] = "module"
+    in_function: bool = False
+    typing_only: bool = False
+    conditional: bool = False
+    exception_handler: bool = False
+    package_initializer: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +79,7 @@ class ImportFact:
     as_name: str | None
     bound_name: str
     relative_level: int
+    context: ImportContext = ImportContext()
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,8 +94,6 @@ class Diagnostic:
 
 @dataclass(frozen=True, slots=True)
 class FactCollection:
-    """Every unreadable or unsupported input has an error diagnostic."""
-
     facts: tuple[ImportFact, ...]
     diagnostics: tuple[Diagnostic, ...] = ()
 
@@ -114,21 +128,43 @@ class UnresolvedImport:
 
 
 @dataclass(frozen=True, slots=True)
-class ResolutionResult:
-    dependencies: tuple[DependencyEdge, ...]
-    external_imports: tuple[ExternalImport, ...]
-    unresolved_imports: tuple[UnresolvedImport, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class EvidenceLocation:
-    """Self-contained evidence; paths are relative to cwd, positions one-based."""
+    """Locations use cwd-relative paths and one-based character positions."""
 
     path: str
     line: int
     column: int
     source_segment: str | None
     resolution_kind: ResolutionKind | None
+    context: ImportContext = ImportContext()
+
+
+@dataclass(frozen=True, slots=True)
+class TargetDeclaration:
+    name: str
+    kind: TargetKind
+    reason: str
+    path: str | None = None
+    acknowledged: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class TargetBoundary:
+    name: str
+    kind: TargetKind
+    path: str | None
+    reason: str
+    acknowledged: bool
+    evidence: tuple[EvidenceLocation, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionResult:
+    dependencies: tuple[DependencyEdge, ...]
+    external_imports: tuple[ExternalImport, ...]
+    unresolved_imports: tuple[UnresolvedImport, ...]
+    diagnostics: tuple[Diagnostic, ...] = ()
+    boundaries: tuple[TargetBoundary, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +180,8 @@ class CycleFinding:
     members: tuple[str, ...]
     definite_members: tuple[str, ...]
     witness: tuple[FindingDependency, ...]
+    dependency_count: int = 0
+    dependencies: tuple[FindingDependency, ...] | None = None
     kind: Literal["cycle"] = field(default="cycle", init=False)
 
 
@@ -161,10 +199,70 @@ Finding = CycleFinding | ImportFinding
 
 
 @dataclass(frozen=True, slots=True)
-class AnalysisReport:
-    """A completed analysis passes exactly when it has no findings."""
-
-    module_count: int
+class GraphView:
     dependency_count: int
+    cyclic_source_count: int
+    cyclic_dependency_count: int
     findings: tuple[Finding, ...]
-    schema_version: Literal["0.5"] = field(default="0.5", init=False)
+
+
+@dataclass(frozen=True, slots=True)
+class GraphViews:
+    structural: GraphView
+    non_typing: GraphView
+    module_body: GraphView
+
+    def selected(self, gate: Gate) -> GraphView:
+        return getattr(self, gate.replace("-", "_"))
+
+
+@dataclass(frozen=True, slots=True)
+class ExcludedPath:
+    path: str
+    rule: str
+    kind: Literal["file", "directory"]
+
+
+@dataclass(frozen=True, slots=True)
+class Coverage:
+    roots: tuple[str, ...]
+    excludes: tuple[str, ...]
+    excluded_paths: tuple[ExcludedPath, ...]
+    analyzed_source_count: int
+    diagnostics: tuple[Diagnostic, ...]
+    boundaries: tuple[TargetBoundary, ...]
+    limitations: tuple[str, ...] = (
+        "Only explicit import statements are analyzed; dynamic imports are outside coverage.",
+        "External dependencies and runtime initialization are not analyzed.",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisOptions:
+    excludes: tuple[str, ...] = ()
+    gate: Gate = "structural"
+    details: Details = "summary"
+    owned_prefixes: tuple[str, ...] = ()
+    targets: tuple[TargetDeclaration, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisReport:
+    """Completion concerns the declared scope, including accepted boundaries."""
+
+    status: Literal["complete", "incomplete"]
+    gate: Gate
+    sources: tuple[SourceModule, ...]
+    coverage: Coverage
+    views: GraphViews
+    schema_version: Literal["0.6"] = field(default="0.6", init=False)
+
+    @property
+    def selected_view(self) -> GraphView:
+        return self.views.selected(self.gate)
+
+    @property
+    def exit_code(self) -> int:
+        return (
+            2 if self.status == "incomplete" else int(bool(self.selected_view.findings))
+        )

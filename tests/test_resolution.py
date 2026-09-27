@@ -16,6 +16,7 @@ def _module(module_id: str, *, package: bool = False) -> SourceModule:
     stem = module_id.replace(".", "/")
     return SourceModule(
         id=module_id,
+        import_name=module_id,
         path=f"{stem}/__init__.py" if package else f"{stem}.py",
         is_package=package,
         parent_package=module_id.rpartition(".")[0] or None,
@@ -175,7 +176,7 @@ def test_namespace_bases_are_unmodelled_but_indexed_leaf_is_probable() -> None:
         _fact("fact-missing", "app", base="ns.missing"),
     )
 
-    result = resolve_imports(facts, modules, ("ns",))
+    result = resolve_imports(facts, modules, ("ns",), owned_prefixes=("ns",))
 
     assert _dependency_map(result) == {
         ("app", "ns.leaf"): (("fact-from-ns", ResolutionKind.PROBABLE_SUBMODULE),)
@@ -515,7 +516,6 @@ def test_architecture_suppresses_only_base_for_the_same_fact() -> None:
     assert architecture_dependencies(result.dependencies) == result.dependencies
 
 
-
 def test_missing_namespace_child_is_distinct_from_valid_namespace_base() -> None:
     result = resolve_imports(
         (
@@ -529,6 +529,7 @@ def test_missing_namespace_child_is_distinct_from_valid_namespace_base() -> None
         ),
         (_module("app"), _module("namespace.real")),
         ("namespace",),
+        owned_prefixes=("namespace",),
     )
     assert [(item.requested, item.reason) for item in result.unresolved_imports] == [
         ("namespace", UnresolvedReason.NAMESPACE_BASE_UNMODELLED),

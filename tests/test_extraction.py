@@ -101,9 +101,11 @@ def test_unicode_columns_are_one_based_in_public_findings(tmp_path: Path) -> Non
         encoding="utf-8",
     )
     (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
-    (cycle,) = analyse(tmp_path).findings
+    report = analyse((tmp_path,))
+    (cycle,) = report.views.structural.findings
     assert cycle.kind == "cycle"
-    edge = next(edge for edge in cycle.witness if edge.source == "a")
+    source_id = next(item.id for item in report.sources if item.import_name == "a")
+    edge = next(edge for edge in cycle.witness if edge.source == source_id)
     assert [(item.line, item.column) for item in edge.evidence] == [
         (1, 8),
     ]
@@ -196,15 +198,15 @@ def test_dynamic_import_calls_and_aliases_have_no_evidence_or_findings(
     result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
 
     assert result.diagnostics == ()
-    assert [(fact.source, fact.base_module) for fact in result.facts] == [
+    assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
         ("a", "importlib"),
         ("a", "importlib"),
         ("a", "importlib"),
         ("b", "a"),
     ]
-    report = analyse(tmp_path)
-    assert report.dependency_count == 1
-    assert report.findings == ()
+    report = analyse((tmp_path,))
+    assert report.views.structural.dependency_count == 1
+    assert report.views.structural.findings == ()
 
 
 @pytest.mark.parametrize("postponed", [False, True])
@@ -235,7 +237,7 @@ if TYPE_CHECKING:
     assert [fact.base_module for fact in result.facts] == (
         (["__future__"] if postponed else []) + ["importlib", "typing", "a"]
     )
-    assert analyse(tmp_path).findings == ()
+    assert analyse((tmp_path,)).views.structural.findings == ()
 
 
 def test_read_decode_and_parse_failures_are_stable_and_do_not_stop_collection(
@@ -263,7 +265,7 @@ def test_read_decode_and_parse_failures_are_stable_and_do_not_stop_collection(
     ]
     assert all(item.severity is Severity.ERROR for item in result.diagnostics)
     assert all(str(tmp_path) not in item.message for item in result.diagnostics)
-    assert [(fact.source, fact.base_module) for fact in result.facts] == [
+    assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
         ("good", "target")
     ]
 
@@ -301,6 +303,14 @@ def test_fact_ids_and_order_are_deterministic(tmp_path: Path) -> None:
         first.bound_name,
         first.relative_level,
         first.source_segment,
+        (
+            first.context.scope,
+            first.context.in_function,
+            first.context.typing_only,
+            first.context.conditional,
+            first.context.exception_handler,
+            first.context.package_initializer,
+        ),
     )
     encoded = json.dumps(
         identity,

@@ -1,13 +1,14 @@
-"""Source failures preserve low-level diagnostics and prevent partial reports."""
+"""Source failures preserve diagnostics and label partial reports incomplete."""
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 import pytest
 
-from pyarchgraph import AnalysisError, analyse, extraction
+from pyarchgraph import analyse, extraction
 from pyarchgraph.cli import main
 from pyarchgraph.discovery import discover_modules
 from pyarchgraph.extraction import AstImportFactSource
@@ -43,17 +44,20 @@ def test_source_parser_limit_reports_failure_and_continues(
     _inject_parse_limit(monkeypatch)
 
     result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
-    assert [(fact.source, fact.base_module) for fact in result.facts] == [
+    assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
         ("good", "target")
     ]
     assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
         ("source_analysis_limit", "broken.py", Severity.ERROR)
     ]
-    with pytest.raises(AnalysisError, match="source_analysis_limit"):
-        analyse(tmp_path)
+    report = analyse((tmp_path,))
+    assert report.status == "incomplete"
+    assert "source_analysis_limit" in {
+        item.code for item in report.coverage.diagnostics
+    }
 
 
-def test_cli_analysis_limit_emits_no_partial_report(
+def test_cli_analysis_limit_emits_incomplete_partial_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -63,9 +67,12 @@ def test_cli_analysis_limit_emits_no_partial_report(
 
     assert main([str(tmp_path)]) == 2
     captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "source_analysis_limit" in captured.err
-    assert "Traceback" not in captured.err
+    document = json.loads(captured.out)
+    assert document["status"] == "incomplete"
+    assert "source_analysis_limit" in {
+        item["code"] for item in document["coverage"]["diagnostics"]
+    }
+    assert captured.err == ""
 
 
 def test_valid_long_expression_does_not_require_recursive_traversal(
@@ -80,7 +87,7 @@ def test_valid_long_expression_does_not_require_recursive_traversal(
     result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
 
     assert result.diagnostics == ()
-    assert [(fact.source, fact.base_module) for fact in result.facts] == [
+    assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
         ("good", "other"),
         ("long", "other"),
     ]
@@ -123,7 +130,7 @@ def test_direct_collector_accepts_regular_files_and_file_symlinks(
     result = AstImportFactSource().collect(tmp_path, (_module("source"),))
 
     assert result.diagnostics == ()
-    assert [(fact.source, fact.base_module) for fact in result.facts] == [
+    assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
         ("source", "target")
     ]
 
@@ -144,18 +151,25 @@ def test_unreadable_source_fails_collection_analysis_and_cli(
     monkeypatch.setattr(extraction.tokenize, "open", open_source)
 
     result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
-    assert [(fact.source, fact.base_module) for fact in result.facts] == [
+    assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
         ("good", "target")
     ]
     assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
         ("source_read_error", "broken.py", Severity.ERROR)
     ]
-    with pytest.raises(AnalysisError, match="source_read_error"):
-        analyse(tmp_path)
+    report = analyse((tmp_path,))
+    assert report.status == "incomplete"
+    assert "source_read_error" in {item.code for item in report.coverage.diagnostics}
 
     assert main([str(tmp_path)]) == 2
     captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "source_read_error" in captured.err
-    assert "broken.py" in captured.err
-    assert "Traceback" not in captured.err
+    document = json.loads(captured.out)
+    assert document["status"] == "incomplete"
+    assert "source_read_error" in {
+        item["code"] for item in document["coverage"]["diagnostics"]
+    }
+    assert any(
+        item["path"].endswith("broken.py")
+        for item in document["coverage"]["diagnostics"]
+    )
+    assert captured.err == ""

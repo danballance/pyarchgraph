@@ -23,14 +23,17 @@ def test_local_and_typing_import_concerns_always_block(
         + statement
         + "\n"
     )
-    report = analyse(tmp_path)
-    (finding,) = report.findings
+    report = analyse((tmp_path,))
+    (finding,) = report.selected_view.findings
     assert finding.kind == "unresolved_import"
-    assert finding.source == "pkg.a"
+    assert (
+        next(item.import_name for item in report.sources if item.id == finding.source)
+        == "pkg.a"
+    )
     assert finding.requested == "pkg.missing"
     assert finding.evidence[0].line == 5
     assert finding.evidence[0].source_segment == statement
-    assert report.dependency_count == 1
+    assert report.selected_view.dependency_count == 1
 
 
 def test_dynamic_calls_produce_no_dependency_or_finding(tmp_path: Path) -> None:
@@ -54,14 +57,14 @@ def test_dynamic_calls_produce_no_dependency_or_finding(tmp_path: Path) -> None:
             for guard in ("if TYPE_CHECKING:", "def later():", "class Container:")
         )
     )
-    report = analyse(tmp_path)
-    assert report.findings == ()
-    assert report.dependency_count == 1
+    report = analyse((tmp_path,))
+    assert report.selected_view.findings == ()
+    assert report.selected_view.dependency_count == 1
 
 
 def test_relative_escape_is_an_explanatory_finding(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("from . import outside\n")
-    (finding,) = analyse(tmp_path).findings
+    (finding,) = analyse((tmp_path,)).selected_view.findings
     assert finding.kind == "unresolved_import"
     assert finding.message
     assert finding.evidence[0].source_segment == "from . import outside"
@@ -71,6 +74,6 @@ def test_external_imports_are_benign(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text(
         "import external\nfrom other_external import thing\n"
     )
-    report = analyse(tmp_path)
-    assert report.dependency_count == 0
-    assert report.findings == ()
+    report = analyse((tmp_path,))
+    assert report.selected_view.dependency_count == 0
+    assert report.selected_view.findings == ()

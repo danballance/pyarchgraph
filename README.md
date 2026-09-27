@@ -1,166 +1,183 @@
 # pyarchgraph
 
-Check a Python project's explicit import statements for cycles and unresolved
-internal imports. Project code is parsed, never executed.
+Check a Python project's explicit import dependencies for cycles and missing
+internal targets. Source is parsed, never executed. Reports describe the selected
+source scope and its coverage; they do not certify runtime import safety.
 
 ## Run
 
-Python 3.11 or newer is required, except CPython 3.14.1 because of its
-`dataclasses` regression affecting NetworkX. Use an interpreter that supports
-the source syntax being checked. NetworkX is the only runtime dependency.
-
-From a clone:
+Python 3.11 or newer is required, except CPython 3.14.1. Use an interpreter that
+supports the source syntax being checked. NetworkX is the only runtime dependency.
 
 ```console
 uv sync
 uv run pyarchgraph . --exclude examples --exclude docs
+uv run pyarchgraph src
+uv run pyarchgraph . src --exclude backend
 ```
 
-Or run from Git:
+Each root is a directory normally placed on `sys.path`. Multiple explicit roots
+are analyzed together. Nested roots take ownership of their own files, so `.`
+and `src` do not duplicate source identities. Root order has no precedence;
+conflicting bindings across roots are an incomplete analysis. Root diagnostics
+suggest corrections but never silently alter the selected scope.
 
-```console
-uvx --python '>=3.11,!=3.14.1' --from git+https://github.com/danballance/pyarchgraph pyarchgraph SOURCE_ROOT
-```
+The command writes one JSON object to stdout and creates no report files. Redirect
+stdout to save a report. Configuration/argument errors that prevent analysis are
+reported on stderr instead.
 
-The source root is the directory normally placed on `sys.path`. Pass the
-repository root for a flat layout, or `src` for a source layout. Passing the
-package directory itself is not supported. A recognizable `src.pkg`/`pkg`
-mismatch is an error; the tool does not discover or correct the root for you.
+## Results and views
 
-Use exclusions to omit generated code or other directories:
+| Exit | Meaning |
+| --- | --- |
+| `0` | Complete within declared scope and accepted boundaries; selected view has no findings |
+| `1` | Complete within that scope; selected view has findings |
+| `2` | Incomplete analysis, or invalid invocation/configuration |
 
-```console
-uv run pyarchgraph src --exclude 'app/generated/**'
-```
+Source-analysis errors produce **partial JSON**, including recovered findings,
+coverage diagnostics and sources that could not be parsed. An incomplete scan
+never passes, even if the recovered graph has no cycles.
 
-`--exclude GLOB` excludes a POSIX-relative file or directory pattern. Repeat
-it to combine exclusions. Matching uses `pathlib.PurePosixPath.match`.
+Every report contains three views:
 
-Directories named `tests`, files named `test_*.py` or `*_test.py`, and the usual
-`.git`, `.venv`, `venv`, `__pycache__`, `build`, and `dist` directories are always
-excluded. Imports inside functions, classes, conditional branches, and
-`TYPE_CHECKING` blocks always count as structural dependencies.
-
-## Results
-
-Completed analysis writes one JSON object to stdout. A clean example is:
-
-```json
-{
-  "dependency_count": 3,
-  "findings": [],
-  "module_count": 4,
-  "schema_version": "0.5"
-}
-```
-
-| Exit | Meaning | Output |
+| CLI gate | JSON view | Import sites included |
 | --- | --- | --- |
-| `0` | Complete analysis with no blocking findings | JSON on stdout |
-| `1` | Complete analysis with blocking findings | JSON on stdout |
-| `2` | Invalid configuration or incomplete/invalid source analysis | Explanation on stderr; no JSON |
-
-An empty inventory, ambiguous module names, unreadable or unparseable source,
-and an incorrect source root are errors. Partial findings cannot turn an
-analysis error into a completed report.
-
-The command creates no files. To save a report, redirect stdout:
+| `structural` (default) | `structural` | All explicit import statements |
+| `non-typing` | `non_typing` | Excludes recognized `TYPE_CHECKING` bodies |
+| `module-body` | `module_body` | Also excludes sites inside any function/method; top-level class bodies remain |
 
 ```console
-uv run pyarchgraph src > dependency-check.json
+uv run pyarchgraph src --gate non-typing
+uv run pyarchgraph src --gate module-body --details component-edges
 ```
 
-Every entry in `findings` prevents a pass:
+Only the selected gate's findings determine exit `1`; other views remain
+informational. Coverage remains independent of the gate. For example, selecting
+`module-body` cannot conceal an unacknowledged stub target mentioned only inside
+a typing guard.
 
-- `cycle`: one finding per cyclic strongly connected component, including
-  self-imports. It lists the component's members, the subset participating in
-  definite cycles, and one bounded cycle witness. A definite witness takes
-  precedence; a possible witness retains its uncertainty. The component size
-  is not a claim about the length of a simple cycle.
-- `unresolved_import`: a missing internal target or an escaping relative import.
+`TYPE_CHECKING` recognition is deliberately conservative: simple positive tests
+of unambiguously imported module-level typing aliases are recognized; rebinding,
+shadowing, compound/negated tests and custom conditions are retained. A function
+can run during startup, and a module-body import can be conditional. These views
+are syntactic dependency filters, not execution-order simulations.
 
-Evidence includes the original import text where available, a path relative to
-the command's working directory, one-based line and column numbers, and the
-resolution kind. The source-root prefix is included for `src` layouts.
-Repeated imports do not increase the distinct dependency count. Findings and
-source evidence have deterministic ordering.
+## Scope, ownership and boundaries
 
-## Import analysis
+All selected `.py` files are inventoried, including numeric migrations,
+keyword-named directories, hyphenated scripts and hidden helpers. A source that
+cannot be mapped losslessly to a dotted name still contributes outgoing absolute
+imports. Relative imports without an established package context are coverage
+errors. Ordinary same-root package/module precedence is represented explicitly;
+shadowed sources are still parsed.
 
-The analyzer parses each discovered Python module and collects every `import`
-and `from ... import ...` statement throughout its syntax tree. Statements count
-whether or not their containing code executes. There is one statement-based
-analysis mode.
+Regular packages and exact source modules establish internal ownership. Shared
+namespace ancestors do not: discovering `google.api_core` does not imply owning
+`google.auth`. A missing target inside an owned branch is a finding; unknown
+external branches are outside this graph, without a claim that they are installed.
 
-Absolute and relative submodule spellings produce the same structural targets.
-For `from package import child`, a source-backed child takes precedence over
-that statement's redundant package-base relationship. The child remains a
-probable relationship because an initializer could bind an attribute with the
-same name. Independent package imports and legitimate re-exports retain their
-package dependencies.
+Use `--exclude GLOB` repeatedly for POSIX-relative `PurePosixPath.match` patterns.
+Patterns apply within each selected root. Tests (`tests`, `test_*.py`, `*_test.py`)
+and the usual `.git`, `.venv`, `venv`, `__pycache__`, `build`, and `dist` directories
+are excluded automatically. Reports disclose exclusions and pruned directories;
+they do not recursively count files inside excluded trees. File symlinks are
+retained under their logical paths; directory symlinks are not traversed.
 
-Harmless probable relationships do not prevent a pass. A possible cycle does.
-Valid namespace-package bases and external imports are not missing internal
-targets. Unknown top-level names are treated as external; the tool cannot
-distinguish every misspelled import from an external package without additional
-knowledge.
+Stubs, Cython sources and recognizable native artifacts explain a target's
+availability but do not reveal its implementation dependencies. Referenced
+project-owned targets of this kind keep the result incomplete until explicitly
+acknowledged. Generated and otherwise unrecognizable native targets can be
+declared in an explicit TOML configuration:
 
-Calls to `importlib.import_module()`, `__import__()`, and aliases of these
-functions produce no dependencies or findings. Surrounding explicit import
-statements still count. Dependencies introduced solely through dynamic imports
-are outside pyarchgraph's coverage; a passing report does not establish their
-absence.
+```toml
+owned_prefixes = ["acme"]
 
-Annotations, generic bounds, type parameter defaults, and type alias expressions
-are not interpreted. For example, `def validate[ModelT: BaseModel](...)` does not
-prevent analysis: the explicit import of `BaseModel` already represents its
-module dependency. The running interpreter must support the source syntax;
-invalid or unsupported Python syntax still prevents analysis.
+[[targets]]
+name = "acme.engine"
+kind = "native"
+reason = "Compiled implementation is checked separately"
+acknowledged = true
+
+[[targets]]
+name = "acme.version"
+kind = "generated"
+path = "build_config.py"
+reason = "Release build generates this module"
+acknowledged = true
+```
+
+```console
+uv run pyarchgraph src --config architecture.toml
+```
+
+Supported configured kinds are `stub`, `native` and `generated`. Each target needs
+an exact name and a reason. `path` is optional and relative to the configuration
+file; `acknowledged` defaults to false. Configuration is never discovered
+implicitly. Roots, exclusions, gate and detail are CLI/API options, not TOML keys.
+
+Acknowledgement remains visible in the report. It does not mark an implementation
+as analyzed, create graph edges through it, suppress real source dependencies,
+or excuse parse failures or competing bindings. Unused acknowledgements produce
+warnings. Missing internal targets remain findings, distinct from coverage errors.
+
+## JSON schema 0.6
+
+The envelope contains `schema_version`, `status`, `gate`, `sources`, `coverage`
+and `views`. Source IDs are `source:` followed by a working-directory-relative
+POSIX path. Graph endpoints refer to these IDs; `sources` provides their paths,
+import names, binding status and analysis status.
+
+Each view contains dependency, cyclic-source and cyclic-dependency counts and
+findings. A cycle finding represents one cyclic strongly connected component,
+including a self-loop, with its members, definite members and one deterministic
+witness. `--details component-edges` additionally includes every internal
+component dependency. The command never enumerates all elementary cycles.
+
+Evidence is deduplicated per dependency, with one-based character positions,
+original statement text, resolution kind and execution-context annotations.
+`definite` describes resolution certainty, not an import-time crash. Possible
+cycles also fail their selected gate; harmless probable edges do not.
+
+The resolver normalizes equivalent absolute/relative submodule spellings.
+Independent package imports and legitimate re-exports retain their relationships.
+Initializer self-base suppression does not suppress ordinary-module self-imports.
+Calls to `importlib.import_module()`, `__import__()` and their aliases remain
+outside coverage. External implementation graphs, type-expression evaluation,
+build execution and initialization-order proof remain outside scope.
 
 ## Python API
 
 ```python
 from pathlib import Path
-from pyarchgraph import AnalysisError, AnalysisReport, analyse, render_json
+from pyarchgraph import AnalysisOptions, analyse, render_json
 
-try:
-    report: AnalysisReport = analyse(
-        Path("src"),
-        excludes=("app/generated/**",),
-    )
-except AnalysisError as error:
-    print(error)
-else:
-    print(render_json(report), end="")
+report = analyse(
+    (Path("."), Path("src")),
+    options=AnalysisOptions(excludes=("examples",), gate="structural"),
+)
+print(render_json(report), end="")
+print(report.status, report.exit_code)
 ```
 
-The frozen report exposes the same fields as JSON. Invalid option values raise
-`ValueError`; invalid or incomplete analysis raises `AnalysisError`, a
-`ValueError` subclass. There is no score, diagram, baseline, output selection,
-or configurable evidence policy in version 0.5.1.
+`AnalysisOptions` also accepts `details`, `owned_prefixes` and a tuple of frozen
+`TargetDeclaration` values. Invalid options raise `ValueError`; invalid roots
+raise `AnalysisError`. Source-analysis failures return an incomplete report.
+Reports and option/domain objects are frozen dataclasses. The report's
+`selected_view` and `exit_code` properties are conveniences, not serialized fields.
 
-Dependency boundary rules have been removed. The former `--forbid` option is
-an unknown argument (exit `2`), and passing `forbidden_dependencies` to
-`analyse()` raises `TypeError`.
+Version 0.6 replaces the former single-root Python API and JSON schema 0.5.
+Checksmith's matching adapter must be upgraded together; it validates schema 0.6
+strictly and maps partial reports to its error status. There is no legacy parser.
 
 ## Verification
 
 ```console
-uv run pytest tests/test_examples.py -q
-uv run python -m examples.evaluate
 uv run pytest -q
+uv run python -m examples.evaluate
 ```
 
-The [example corpus](examples/README.md) covers 25 projects and 28 runs. The
-manifest explicitly expects ten passes, 17 findings reports, and one analysis
-error. The evaluator runs the real CLI and fails if any expectation differs.
-Fixture applications are never imported or executed. Historical reviewed
-measurements remain archival; their obsolete scores do not specify current
-behavior.
-
-Checksmith consumes the JSON directly through its normal subprocess adapter.
-Its integration suite also runs all 28 examples through that adapter. Version
-0.5.1 limits analysis to explicit import statements and retains JSON schema
-`0.5` and the existing exit codes. Update the pinned pyarchgraph revision in
-Checksmith and consuming configurations together. The invocation is simply
-`pyarchgraph .` (or `pyarchgraph src`), plus any exclusions.
+The [example corpus](examples/README.md) has 31 projects and 40 configured runs,
+including all three gates, multiple roots, partial analysis and acknowledged
+boundaries. Examples are parsed and never executed. Original research and its
+source hashes remain archival. Collection benchmarks and fresh campaign replay
+scripts live in `benchmarks/`; they do not overwrite the original research.

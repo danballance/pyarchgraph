@@ -32,8 +32,8 @@ def test_complete_analysis_prints_only_json_and_generates_no_files(
     assert main([str(tmp_path)]) == expected
     output = capsys.readouterr()
     document = json.loads(output.out)
-    assert document["schema_version"] == "0.5"
-    assert bool(document["findings"]) == bool(expected)
+    assert document["schema_version"] == "0.6"
+    assert bool(document["views"]["structural"]["findings"]) == bool(expected)
     assert output.err == ""
     assert output.out.endswith("\n")
     assert set(tmp_path.rglob("*")) == before
@@ -48,15 +48,14 @@ def test_complete_analysis_prints_only_json_and_generates_no_files(
         {"a.py": "import b\n", "b.py": "import a\n", "broken.py": "def nope(:\n"},
     ],
 )
-def test_analysis_errors_return_two_without_partial_json(
+def test_analysis_errors_return_two_with_partial_json(
     tmp_path: Path, capsys, files: dict[str, str]
 ) -> None:
     _write(tmp_path, files)
     assert main([str(tmp_path)]) == 2
     output = capsys.readouterr()
-    assert output.out == ""
-    assert output.err
-    assert "Traceback" not in output.err
+    assert json.loads(output.out)["status"] == "incomplete"
+    assert output.err == ""
 
 
 def test_nonexistent_source_is_an_error(tmp_path: Path, capsys) -> None:
@@ -84,7 +83,7 @@ def test_exclusions_are_repeatable_and_applied_before_parsing(
         },
     )
     assert main([str(tmp_path), "--exclude", "bad.py", "--exclude", "generated"]) == 0
-    assert json.loads(capsys.readouterr().out)["module_count"] == 1
+    assert len(json.loads(capsys.readouterr().out)["sources"]) == 1
 
 
 @pytest.mark.parametrize(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import re
 import stat
 import tokenize
 from collections.abc import Iterable
@@ -15,6 +16,7 @@ from pathlib import Path
 from pyarchgraph.model import (
     Diagnostic,
     FactCollection,
+    ImportContext,
     ImportFact,
     ImportSyntax,
     Severity,
@@ -22,6 +24,18 @@ from pyarchgraph.model import (
 )
 
 _FACT_ID_PREFIX_LENGTH = 12
+_PHYSICAL_LINE = re.compile(r"(.*?(?:\r\n|\n|\r|$))")
+
+
+def _context_identity(context: ImportContext) -> tuple[object, ...]:
+    return (
+        context.scope,
+        context.in_function,
+        context.typing_only,
+        context.conditional,
+        context.exception_handler,
+        context.package_initializer,
+    )
 
 
 def _nullable_string(value: str | None) -> str:
@@ -50,6 +64,7 @@ def _fact_sort_key(fact: ImportFact) -> tuple[object, ...]:
         fact.bound_name,
         fact.relative_level,
         _nullable_string(fact.source_segment),
+        _context_identity(fact.context),
     )
 
 
@@ -71,6 +86,7 @@ def _fact_identity(fact: ImportFact) -> tuple[object, ...]:
         fact.bound_name,
         fact.relative_level,
         fact.source_segment,
+        _context_identity(fact.context),
     )
 
 
@@ -140,39 +156,203 @@ def _syntax_error_column(error: SyntaxError) -> int | None:
     return max(error.offset - 1, 0)
 
 
-def _character_column(lines: list[str], line: int, byte_column: int) -> int:
-    """Convert an AST UTF-8 byte offset to a zero-based character column."""
+class _SourceText:
+    """Cache physical UTF-8 lines once, without splitting Unicode separators."""
 
-    return len(lines[line - 1].encode("utf-8")[:byte_column].decode("utf-8"))
+    def __init__(self, source: str) -> None:
+        self.lines = tuple(
+            line.encode("utf-8") for line in _PHYSICAL_LINE.findall(source)
+        )
+
+    def column(self, line: int, byte_column: int) -> int:
+        return len(self.lines[line - 1][:byte_column].decode("utf-8"))
+
+    def segment(self, node: ast.AST) -> str | None:
+        line = getattr(node, "lineno", None)
+        end_line = getattr(node, "end_lineno", None)
+        column = getattr(node, "col_offset", None)
+        end_column = getattr(node, "end_col_offset", None)
+        if any(value is None for value in (line, end_line, column, end_column)):
+            return None
+        if line == end_line:
+            return self.lines[line - 1][column:end_column].decode("utf-8")
+        return b"".join(
+            (
+                self.lines[line - 1][column:],
+                *self.lines[line : end_line - 1],
+                self.lines[end_line - 1][:end_column],
+            )
+        ).decode("utf-8")
+
+
+def _typing_aliases(tree: ast.Module) -> tuple[set[str], set[str]]:
+    """Recognize unambiguous module bindings, conservatively across the file.
+
+    Scoped, conditional, negated and compound bindings are not inferred. Any
+    observed shadowing disables a name throughout the file, including uses
+    before the shadowing site. No target code or annotation is evaluated.
+    """
+
+    direct: set[str] = set()
+    qualified: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            qualified.update(
+                alias.asname or "typing"
+                for alias in node.names
+                if alias.name == "typing"
+            )
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.level == 0
+            and node.module == "typing"
+        ):
+            direct.update(
+                alias.asname or "TYPE_CHECKING"
+                for alias in node.names
+                if alias.name == "TYPE_CHECKING"
+            )
+    if not direct and not qualified:
+        return set(), set()
+    conflicting: set[str] = set()
+    module_statements = set(tree.body)
+    wildcard = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.asname or alias.name.partition(".")[0]
+                if node in module_statements and alias.name == "typing":
+                    qualified.add(name)
+                else:
+                    conflicting.add(name)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                name = alias.asname or alias.name
+                wildcard |= alias.name == "*"
+                if (
+                    node in module_statements
+                    and node.level == 0
+                    and node.module == "typing"
+                    and alias.name == "TYPE_CHECKING"
+                ):
+                    direct.add(name)
+                else:
+                    conflicting.add(name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            conflicting.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            conflicting.add(node.name)
+        elif isinstance(node, ast.arg):
+            conflicting.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            conflicting.add(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            conflicting.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            conflicting.add(node.rest)
+        elif (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            and node.attr == "TYPE_CHECKING"
+            and isinstance(node.value, ast.Name)
+        ):
+            conflicting.add(node.value.id)
+        elif type(node).__name__ in {"TypeVar", "TypeVarTuple", "ParamSpec"}:
+            conflicting.add(node.name)
+    if wildcard:
+        return set(), set()
+    # A spelling used for both forms is ambiguous too.
+    conflicting.update(direct & qualified)
+    return direct - conflicting, qualified - conflicting
+
+
+def _imports_with_context(
+    module: SourceModule, tree: ast.Module
+) -> Iterable[tuple[ast.Import | ast.ImportFrom, ImportContext]]:
+    direct, qualified = _typing_aliases(tree)
+    initial = ImportContext(package_initializer=module.is_package)
+    pending: list[tuple[ast.AST, ImportContext]] = [(tree, initial)]
+    guarded = (
+        ast.If,
+        ast.For,
+        ast.AsyncFor,
+        ast.While,
+        ast.Try,
+        ast.TryStar,
+        ast.With,
+        ast.AsyncWith,
+        ast.Match,
+    )
+    while pending:
+        node, context = pending.pop()
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            yield node, context
+            continue
+        type_checking = isinstance(node, ast.If) and (
+            isinstance(node.test, ast.Name)
+            and node.test.id in direct
+            or isinstance(node.test, ast.Attribute)
+            and node.test.attr == "TYPE_CHECKING"
+            and isinstance(node.test.value, ast.Name)
+            and node.test.value.id in qualified
+        )
+        for field, value in ast.iter_fields(node):
+            child_context = context
+            if field == "body" and isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef)
+            ):
+                child_context = replace(
+                    child_context, scope="function", in_function=True
+                )
+            elif field == "body" and isinstance(node, ast.ClassDef):
+                child_context = replace(child_context, scope="class")
+            if isinstance(node, guarded):
+                child_context = replace(child_context, conditional=True)
+            if type_checking and field == "body":
+                child_context = replace(child_context, typing_only=True)
+            if isinstance(node, ast.ExceptHandler):
+                child_context = replace(child_context, exception_handler=True)
+            for child in value if isinstance(value, list) else (value,):
+                # Explicit import statements cannot occur inside expressions.
+                # Alias analysis above still visits them to catch NamedExpr,
+                # comprehensions and other binding/shadowing expressions.
+                if isinstance(child, ast.AST) and not isinstance(child, ast.expr):
+                    pending.append((child, child_context))
 
 
 def _collect_import_facts(
     module: SourceModule, source: str, tree: ast.Module
 ) -> Iterable[ImportFact]:
-    """Collect every explicit import, independent of its execution context."""
+    """Collect every explicit import and annotate its syntactic context."""
 
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.Import, ast.ImportFrom)):
-            continue
+    text = _SourceText(source)
+    for node, context in _imports_with_context(module, tree):
         is_from = isinstance(node, ast.ImportFrom)
+        segment = text.segment(node)
+        column = text.column(node.lineno, node.col_offset)
+        end_line = getattr(node, "end_lineno", None)
+        end_column = getattr(node, "end_col_offset", None)
+        if end_line is not None and end_column is not None:
+            end_column = text.column(end_line, end_column)
         for alias_index, alias in enumerate(node.names):
             yield ImportFact(
                 id="",
                 source=module.id,
                 path=module.path,
                 line=node.lineno,
-                column=node.col_offset,
-                end_line=getattr(node, "end_lineno", None),
-                end_column=getattr(node, "end_col_offset", None),
+                column=column,
+                end_line=end_line,
+                end_column=end_column,
                 alias_index=alias_index,
                 syntax=ImportSyntax.IMPORT_FROM if is_from else ImportSyntax.IMPORT,
-                source_segment=ast.get_source_segment(source, node),
+                source_segment=segment,
                 base_module=node.module if is_from else alias.name,
                 imported_name=alias.name if is_from else None,
                 as_name=alias.asname,
                 bound_name=alias.asname
                 or (alias.name if is_from else alias.name.partition(".")[0]),
                 relative_level=node.level if is_from else 0,
+                context=context,
             )
 
 
@@ -261,21 +441,7 @@ class AstImportFactSource:
                 # successful extraction. Continue collecting other modules.
                 continue
 
-            # AST positions count UTF-8 bytes, unlike SyntaxError offsets and
-            # the character columns exposed in findings.
-            lines = source.split("\n")
-            facts.extend(
-                replace(
-                    fact,
-                    column=_character_column(lines, fact.line, fact.column),
-                    end_column=(
-                        _character_column(lines, fact.end_line, fact.end_column)
-                        if fact.end_line is not None and fact.end_column is not None
-                        else fact.end_column
-                    ),
-                )
-                for fact in module_facts
-            )
+            facts.extend(module_facts)
 
         return FactCollection(
             facts=canonicalise_fact_ids(facts),

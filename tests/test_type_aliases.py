@@ -59,14 +59,14 @@ def test_type_declarations_leave_only_explicit_import_dependencies(
     result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
 
     assert result.diagnostics == ()
-    assert [(fact.source, fact.base_module) for fact in result.facts] == [
+    assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
         ("a", "base"),
         ("a", "importlib"),
         ("b", "a"),
     ]
-    report = analyse(tmp_path)
-    assert report.dependency_count == 2
-    assert report.findings == ()
+    report = analyse((tmp_path,))
+    assert report.views.structural.dependency_count == 2
+    assert report.views.structural.findings == ()
 
 
 @pytest.mark.skipif(sys.version_info < (3, 13), reason="PEP 696 syntax")
@@ -98,12 +98,12 @@ def test_type_parameter_defaults_are_not_interpreted(
     result = AstImportFactSource().collect(tmp_path, discover_modules(tmp_path).modules)
 
     assert result.diagnostics == ()
-    assert [(fact.source, fact.base_module) for fact in result.facts] == [
+    assert [(Path(fact.path).stem, fact.base_module) for fact in result.facts] == [
         ("a", "base"),
         ("a", "importlib"),
         ("b", "a"),
     ]
-    assert analyse(tmp_path).findings == ()
+    assert analyse((tmp_path,)).views.structural.findings == ()
 
 
 def test_generic_bodies_keep_explicit_imports(tmp_path: Path) -> None:
@@ -114,12 +114,13 @@ def test_generic_bodies_keep_explicit_imports(tmp_path: Path) -> None:
         "    return value\n",
     )
 
-    report = analyse(tmp_path)
+    report = analyse((tmp_path,))
 
-    (cycle,) = report.findings
+    (cycle,) = report.views.structural.findings
     assert cycle.kind == "cycle"
     assert cycle.certainty == "definite"
-    assert cycle.members == ("a", "b")
+    names = {item.id: item.import_name for item in report.sources}
+    assert tuple(names[item] for item in cycle.members) == ("a", "b")
 
 
 def test_cli_does_not_evaluate_type_alias_expressions(
@@ -135,6 +136,6 @@ def test_cli_does_not_evaluate_type_alias_expressions(
     captured = capsys.readouterr()
     document = json.loads(captured.out)
     assert captured.err == ""
-    assert document["module_count"] == 3
-    assert document["dependency_count"] == 2
-    assert document["findings"] == []
+    assert len(document["sources"]) == 3
+    assert document["views"]["structural"]["dependency_count"] == 2
+    assert document["views"]["structural"]["findings"] == []

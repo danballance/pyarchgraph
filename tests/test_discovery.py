@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import random
 import subprocess
@@ -8,11 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from pyarchgraph.discovery import (
-    _remove_ambiguous_groups,
-    discover_modules,
-)
-from pyarchgraph.model import Diagnostic, Severity, SourceModule
+from pyarchgraph.discovery import _remove_ambiguous_groups, discover_modules
+from pyarchgraph.model import ExcludedPath, Severity, SourceModule
 
 
 def _write_files(root: Path, paths: list[str]) -> None:
@@ -25,36 +23,31 @@ def _write_files(root: Path, paths: list[str]) -> None:
 def test_maps_modules_packages_main_modules_and_namespace_prefixes(
     tmp_path: Path,
 ) -> None:
-    _write_files(
-        tmp_path,
-        [
-            "top.py",
-            "acme/__init__.py",
-            "acme/api.py",
-            "acme/cli/__main__.py",
-            "namespace/deep/tool.py",
-        ],
-    )
-
+    paths = [
+        "top.py",
+        "acme/__init__.py",
+        "acme/api.py",
+        "acme/cli/__main__.py",
+        "namespace/deep/tool.py",
+    ]
+    _write_files(tmp_path, paths)
     result = discover_modules(tmp_path)
-
-    assert result.modules == (
-        SourceModule("acme", "acme/__init__.py", True, None),
-        SourceModule("acme.api", "acme/api.py", False, "acme"),
-        SourceModule("acme.cli.__main__", "acme/cli/__main__.py", False, "acme.cli"),
-        SourceModule(
+    assert [
+        (item.id, item.import_name, item.is_package, item.parent_package)
+        for item in result.modules
+    ] == [
+        ("source:acme/__init__.py", "acme", True, None),
+        ("source:acme/api.py", "acme.api", False, "acme"),
+        ("source:acme/cli/__main__.py", "acme.cli.__main__", False, "acme.cli"),
+        (
+            "source:namespace/deep/tool.py",
             "namespace.deep.tool",
-            "namespace/deep/tool.py",
             False,
             "namespace.deep",
         ),
-        SourceModule("top", "top.py", False, None),
-    )
-    assert result.namespace_prefixes == (
-        "acme.cli",
-        "namespace",
-        "namespace.deep",
-    )
+        ("source:top.py", "top", False, None),
+    ]
+    assert result.namespace_prefixes == ("acme.cli", "namespace", "namespace.deep")
     assert result.diagnostics == ()
 
 
@@ -75,11 +68,22 @@ def test_default_directory_exclusions_apply_at_every_depth_but_tests_remain(
             "pkg/build/also_ignored.py",
         ],
     )
-
     result = discover_modules(tmp_path)
-
-    assert tuple(module.id for module in result.modules) == ("keep", "tests.test_keep")
-    assert result.namespace_prefixes == ("tests",)
+    assert [module.import_name for module in result.modules] == [
+        "keep",
+        "tests.test_keep",
+    ]
+    assert result.namespace_prefixes == ("pkg", "tests")
+    assert {item.path for item in result.excluded_paths} == {
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "build",
+        "dist",
+        "pkg/build",
+    }
+    assert all(item.kind == "directory" for item in result.excluded_paths)
     assert result.diagnostics == ()
 
 
@@ -96,17 +100,24 @@ def test_user_exclusion_globs_are_or_combined_for_directories_and_files(
             "other/keep.py",
         ],
     )
-
-    result = discover_modules(
-        tmp_path,
-        excludes=("pkg/generated", "*_generated.py"),
-    )
-
-    assert tuple(module.id for module in result.modules) == (
+    result = discover_modules(tmp_path, excludes=("pkg/generated", "*_generated.py"))
+    assert [module.import_name for module in result.modules] == [
         "other.keep",
         "pkg.keep",
-    )
+    ]
     assert result.namespace_prefixes == ("other", "pkg")
+    assert result.excluded_paths == (
+        ExcludedPath("other/drop_generated.py", "*_generated.py", "file"),
+        ExcludedPath("pkg/drop_generated.py", "*_generated.py", "file"),
+        ExcludedPath("pkg/generated", "pkg/generated", "directory"),
+    )
+    assert {
+        (target.name, target.path, target.acknowledged) for target in result.targets
+    } == {
+        ("other.drop_generated", "other/drop_generated.py", True),
+        ("pkg.drop_generated", "pkg/drop_generated.py", True),
+        ("pkg.generated", "pkg/generated/", True),
+    }
 
 
 @pytest.mark.parametrize("pattern", ["", "/absolute/**"])
@@ -117,7 +128,7 @@ def test_invalid_exclusion_patterns_fail_before_discovery(
         discover_modules(tmp_path, excludes=(pattern,))
 
 
-def test_invalid_module_paths_and_root_init_are_diagnosed_and_omitted(
+def test_unusual_names_keep_lossless_identities_and_other_sources_keep_paths(
     tmp_path: Path,
 ) -> None:
     _write_files(
@@ -128,65 +139,74 @@ def test_invalid_module_paths_and_root_init_are_diagnosed_and_omitted(
             "bad-name.py",
             "class.py",
             "bad-dir/child.py",
+            "pkg/0001_initial.py",
+            "pkg/is/formats.py",
+            ".hidden/script.py",
+            "foo.bar.py",
         ],
     )
-
     result = discover_modules(tmp_path)
-
-    assert tuple(module.id for module in result.modules) == ("valid",)
+    by_path = {module.path: module for module in result.modules}
+    assert len(by_path) == 9
+    for path in (
+        "bad-name.py",
+        "class.py",
+        "bad-dir/child.py",
+        "pkg/0001_initial.py",
+        "pkg/is/formats.py",
+    ):
+        assert by_path[path].import_name == path[:-3].replace("/", ".")
+        assert by_path[path].binding_status == "bound"
+    for path in ("__init__.py", ".hidden/script.py", "foo.bar.py"):
+        assert by_path[path].import_name is None
+        assert by_path[path].binding_status == "path_only"
     assert [(item.code, item.path) for item in result.diagnostics] == [
-        ("invalid_module_id", "bad-dir/child.py"),
-        ("invalid_module_id", "bad-name.py"),
-        ("invalid_module_id", "class.py"),
         ("root_init_unsupported", "__init__.py"),
+        ("path_only_source", ".hidden/script.py"),
+        ("path_only_source", "foo.bar.py"),
     ]
-    assert all(item.severity is Severity.ERROR for item in result.diagnostics)
+    assert result.diagnostics[0].severity is Severity.ERROR
     assert all(str(tmp_path) not in item.message for item in result.diagnostics)
 
 
-def test_duplicate_module_id_excludes_the_overlapping_ambiguous_group(
+def test_package_precedence_keeps_shadowed_file_and_all_package_children(
     tmp_path: Path,
 ) -> None:
     _write_files(
-        tmp_path,
-        [
-            "safe.py",
-            "thing.py",
-            "thing/__init__.py",
-            "thing/child.py",
-        ],
+        tmp_path, ["safe.py", "thing.py", "thing/__init__.py", "thing/child.py"]
     )
-
     result = discover_modules(tmp_path)
-
-    assert tuple(module.id for module in result.modules) == ("safe",)
-    assert [(item.code, item.path) for item in result.diagnostics] == [
-        ("duplicate_module_id", "thing.py"),
-        ("non_package_prefix_conflict", "thing.py"),
+    assert len(result.modules) == 4
+    assert {module.path: module.binding_status for module in result.modules} == {
+        "safe.py": "bound",
+        "thing.py": "shadowed",
+        "thing/__init__.py": "bound",
+        "thing/child.py": "bound",
+    }
+    assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
+        ("shadowed_source", "thing.py", Severity.INFO)
     ]
 
 
-def test_non_package_prefix_conflict_excludes_prefix_and_all_descendants(
+def test_non_package_prefix_keeps_sources_but_disables_descendant_bindings(
     tmp_path: Path,
 ) -> None:
     _write_files(
-        tmp_path,
-        [
-            "a.py",
-            "a/child.py",
-            "a/deep/grandchild.py",
-            "unrelated.py",
-        ],
+        tmp_path, ["a.py", "a/child.py", "a/deep/grandchild.py", "unrelated.py"]
     )
-
     result = discover_modules(tmp_path)
-
-    assert tuple(module.id for module in result.modules) == ("unrelated",)
+    assert len(result.modules) == 4
+    assert {module.path: module.binding_status for module in result.modules} == {
+        "a.py": "bound",
+        "a/child.py": "path_only",
+        "a/deep/grandchild.py": "path_only",
+        "unrelated.py": "bound",
+    }
     assert [(item.code, item.path) for item in result.diagnostics] == [
-        ("non_package_prefix_conflict", "a.py"),
+        ("non_package_prefix_conflict", "a/child.py"),
+        ("non_package_prefix_conflict", "a/deep/grandchild.py"),
     ]
-    assert "a/child.py" in result.diagnostics[0].message
-    assert "a/deep/grandchild.py" in result.diagnostics[0].message
+    assert result.namespace_prefixes == ()
 
 
 def test_symlinked_directories_are_not_followed(tmp_path: Path) -> None:
@@ -195,11 +215,13 @@ def test_symlinked_directories_are_not_followed(tmp_path: Path) -> None:
     _write_files(source_root, ["real.py"])
     _write_files(outside, ["hidden.py"])
     (source_root / "linked").symlink_to(outside, target_is_directory=True)
-
     result = discover_modules(source_root)
-
-    assert tuple(module.id for module in result.modules) == ("real",)
+    assert [module.import_name for module in result.modules] == ["real"]
     assert result.namespace_prefixes == ()
+    assert result.excluded_paths == (
+        ExcludedPath("linked", "directory_symlink", "directory"),
+    )
+    assert not result.targets[0].acknowledged
     assert result.diagnostics == ()
 
 
@@ -207,77 +229,48 @@ def test_result_order_is_independent_of_filesystem_walk_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_files(
-        tmp_path,
-        [
-            "z.py",
-            "ns/b.py",
-            "pkg/__init__.py",
-            "pkg/a.py",
-            "bad-name.py",
-        ],
+        tmp_path, ["z.py", "ns/b.py", "pkg/__init__.py", "pkg/a.py", "bad-name.py"]
     )
     expected = discover_modules(tmp_path)
-    walk_entries = [
-        (directory, list(directory_names), list(file_names))
-        for directory, directory_names, file_names in os.walk(tmp_path)
+    entries = [
+        (directory, list(directories), list(files))
+        for directory, directories, files in os.walk(tmp_path)
     ]
 
     def reversed_walk(*args: object, **kwargs: object):
-        del args, kwargs
-        for directory, directory_names, file_names in reversed(walk_entries):
-            yield directory, list(reversed(directory_names)), list(reversed(file_names))
+        for directory, directories, files in reversed(entries):
+            yield directory, list(reversed(directories)), list(reversed(files))
 
     monkeypatch.setattr("pyarchgraph.discovery.os.walk", reversed_walk)
-
     assert discover_modules(tmp_path) == expected
 
 
-def _pairwise_conflict_reference(
-    candidates: list[SourceModule],
-) -> tuple[tuple[SourceModule, ...], tuple[Diagnostic, ...]]:
-    """Independent all-pairs reference for inventory and diagnostic semantics."""
-
-    ordered = sorted(candidates, key=lambda item: (item.id, item.path))
-    groups: dict[str, list[SourceModule]] = {}
-    for candidate in ordered:
-        groups.setdefault(candidate.id, []).append(candidate)
-    excluded: set[SourceModule] = set()
-    duplicates = []
-    prefixes = []
-    for module_id, group in groups.items():
-        if len(group) > 1:
-            excluded.update(group)
-            paths = tuple(item.path for item in group)
-            duplicates.append(
-                Diagnostic(
-                    Severity.ERROR,
-                    "duplicate_module_id",
-                    f"Module ID {module_id!r} is produced by multiple source "
-                    f"files: {', '.join(paths)}.",
-                    path=paths[0],
-                )
-            )
-        non_packages = [item for item in group if not item.is_package]
-        descendants = [
-            item for item in ordered if item.id.startswith(module_id + ".")
+def _pairwise_binding_reference(candidates: list[SourceModule]) -> dict[str, str]:
+    """Independent all-pairs reference for binding precedence and blockers."""
+    status = {}
+    for candidate in candidates:
+        peers = [
+            item for item in candidates if item.import_name == candidate.import_name
         ]
-        if non_packages and descendants:
-            excluded.update(non_packages)
-            excluded.update(descendants)
-            paths = sorted(item.path for item in descendants)
-            prefixes.append(
-                Diagnostic(
-                    Severity.ERROR,
-                    "non_package_prefix_conflict",
-                    f"Non-package module {module_id!r} cannot prefix descendant "
-                    f"modules from: {', '.join(paths)}.",
-                    path=non_packages[0].path,
-                )
-            )
-    return (
-        tuple(item for item in ordered if item not in excluded),
-        tuple(duplicates + prefixes),
-    )
+        packages = [item for item in peers if item.is_package]
+        if len(peers) == 1:
+            status[candidate.id] = "bound"
+        elif len(packages) == 1:
+            status[candidate.id] = "bound" if candidate.is_package else "shadowed"
+        else:
+            status[candidate.id] = "ambiguous"
+    blockers = [
+        item
+        for item in candidates
+        if status[item.id] == "bound" and not item.is_package
+    ]
+    for candidate in candidates:
+        if any(
+            candidate.import_name.startswith(blocker.import_name + ".")
+            for blocker in blockers
+        ):
+            status[candidate.id] = "path_only"
+    return status
 
 
 def test_prefix_index_matches_pairwise_reference_for_generated_inventories() -> None:
@@ -289,18 +282,21 @@ def test_prefix_index_matches_pairwise_reference_for_generated_inventories() -> 
             name = rng.choice(names)
             candidates.append(
                 SourceModule(
-                    name,
-                    f"source{index:02d}/{name.replace('.', '/')}.py",
+                    f"source:{index:02d}",
+                    f"source{index:02d}/{name}.py",
                     bool(rng.randrange(2)),
                     name.rpartition(".")[0] or None,
+                    import_name=name,
                 )
             )
-        expected = _pairwise_conflict_reference(candidates)
-        assert _remove_ambiguous_groups(candidates) == expected
-        assert _remove_ambiguous_groups(reversed(candidates)) == expected
+        expected = _pairwise_binding_reference(candidates)
+        modules, diagnostics = _remove_ambiguous_groups(candidates)
+        assert {module.id: module.binding_status for module in modules} == expected
+        assert len(modules) == len(candidates)
+        assert _remove_ambiguous_groups(reversed(candidates)) == (modules, diagnostics)
 
 
-def test_duplicate_and_nested_prefix_conflicts_remove_transitive_group(
+def test_nested_package_precedence_does_not_shadow_other_descendants(
     tmp_path: Path,
 ) -> None:
     _write_files(
@@ -317,58 +313,48 @@ def test_duplicate_and_nested_prefix_conflicts_remove_transitive_group(
             "safe/child.py",
         ],
     )
-
     result = discover_modules(tmp_path)
-
-    assert tuple(module.id for module in result.modules) == ("aa", "safe", "safe.child")
-    assert [(item.code, item.path) for item in result.diagnostics] == [
-        ("duplicate_module_id", "a.py"),
-        ("duplicate_module_id", "a/b.py"),
-        ("non_package_prefix_conflict", "a.py"),
-        ("non_package_prefix_conflict", "a/b.py"),
-    ]
-    assert (
-        "a/b.py, a/b/__init__.py, a/b/child.py, a/sibling.py"
-        in result.diagnostics[2].message
+    assert len(result.modules) == 9
+    assert {
+        module.path for module in result.modules if module.binding_status == "shadowed"
+    } == {"a.py", "a/b.py"}
+    assert all(
+        module.binding_status in {"bound", "shadowed"} for module in result.modules
     )
+    assert all(item.severity is Severity.INFO for item in result.diagnostics)
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO fixture")
-def test_non_regular_source_is_diagnosed_and_omitted(tmp_path: Path) -> None:
+def test_non_regular_source_is_diagnosed_and_retained_in_inventory(
+    tmp_path: Path,
+) -> None:
     _write_files(tmp_path, ["ordinary.py"])
     os.mkfifo(tmp_path / "pipe.py")
-
     result = discover_modules(tmp_path)
-
-    assert tuple(module.id for module in result.modules) == ("ordinary",)
+    assert [module.path for module in result.modules] == ["ordinary.py", "pipe.py"]
     assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
-        ("source_not_regular", "pipe.py", Severity.ERROR),
+        ("source_not_regular", "pipe.py", Severity.ERROR)
     ]
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO fixture")
-def test_fifo_cli_exits_promptly_without_partial_report(tmp_path: Path) -> None:
-    source = tmp_path / "source"
-    source.mkdir()
-    _write_files(source, ["ordinary.py"])
-    os.mkfifo(source / "pipe.py")
-
+def test_fifo_cli_exits_promptly_with_partial_report(tmp_path: Path) -> None:
+    _write_files(tmp_path, ["ordinary.py"])
+    os.mkfifo(tmp_path / "pipe.py")
     completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pyarchgraph",
-            str(source),
-        ],
+        [sys.executable, "-m", "pyarchgraph", str(tmp_path)],
         capture_output=True,
         text=True,
         timeout=5,
         check=False,
     )
-
     assert completed.returncode == 2
-    assert completed.stdout == ""
-    assert "source_not_regular" in completed.stderr
+    report = json.loads(completed.stdout)
+    assert report["status"] == "incomplete"
+    assert any(
+        item["code"] == "source_not_regular"
+        for item in report["coverage"]["diagnostics"]
+    )
 
 
 def test_regular_file_symlinks_are_retained(tmp_path: Path) -> None:
@@ -380,25 +366,61 @@ def test_regular_file_symlinks_are_retained(tmp_path: Path) -> None:
         (source / "linked.py").symlink_to(target)
     except (NotImplementedError, OSError):
         pytest.skip("file symlinks are unavailable")
-
     result = discover_modules(source)
-
-    assert tuple(module.id for module in result.modules) == ("linked", "ordinary")
+    assert [module.import_name for module in result.modules] == ["linked", "ordinary"]
     assert result.diagnostics == ()
 
 
-def test_disappearing_source_remains_an_explicit_read_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_disappearing_source_remains_in_inventory_with_read_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         "pyarchgraph.discovery.os.walk",
         lambda *args, **kwargs: [(str(tmp_path), [], ["missing.py"])],
     )
-
     result = discover_modules(tmp_path)
-
-    assert result.modules == ()
+    assert [module.path for module in result.modules] == ["missing.py"]
     assert [(item.code, item.path, item.severity) for item in result.diagnostics] == [
-        ("source_read_error", "missing.py", Severity.ERROR),
+        ("source_read_error", "missing.py", Severity.ERROR)
     ]
+
+
+def test_inventory_recognizes_stub_and_native_targets_without_graph_nodes(
+    tmp_path: Path,
+) -> None:
+    _write_files(
+        tmp_path,
+        [
+            "app.py",
+            "pkg/stub.pyi",
+            "pkg/native.pyx",
+            "pkg/compiled.cpython-313-x86_64-linux-gnu.so",
+            "pkg/win.cp313-win_amd64.pyd",
+            "pkg/helper.c",
+            "pkg/binary.unknown.so",
+            "pkg/stubs/__init__.pyi",
+        ],
+    )
+    result = discover_modules(tmp_path)
+    assert [module.path for module in result.modules] == ["app.py"]
+    assert {(target.name, target.kind) for target in result.targets} == {
+        ("pkg.stub", "stub"),
+        ("pkg.native", "native"),
+        ("pkg.compiled", "native"),
+        ("pkg.win", "native"),
+        ("pkg.stubs", "stub"),
+    }
+    assert all(not target.acknowledged for target in result.targets)
+
+
+def test_selected_root_pruning_is_exact_and_does_not_create_excluded_target(
+    tmp_path: Path,
+) -> None:
+    _write_files(tmp_path, ["main.py", "src/pkg/a.py", "nested/src/kept.py"])
+    result = discover_modules(tmp_path, pruned_directories=("src",))
+    assert [module.path for module in result.modules] == [
+        "main.py",
+        "nested/src/kept.py",
+    ]
+    assert result.excluded_paths == (ExcludedPath("src", "selected-root", "directory"),)
+    assert result.targets == ()

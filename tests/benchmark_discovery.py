@@ -26,10 +26,11 @@ def _inventory(count: int, case: str) -> tuple[SourceModule, ...]:
     )
     return tuple(
         SourceModule(
-            name,
+            "source:" + name.replace(".", "/") + ".py",
             name.replace(".", "/") + ".py",
             False,
             name.rpartition(".")[0] or None,
+            import_name=name,
         )
         for name in names
     )
@@ -40,7 +41,7 @@ def _quadratic_prefix_scan(candidates: tuple[SourceModule, ...]) -> int:
 
     by_id: dict[str, list[int]] = {}
     for index, candidate in enumerate(candidates):
-        by_id.setdefault(candidate.id, []).append(index)
+        by_id.setdefault(candidate.import_name, []).append(index)
     conflicts = 0
     for prefix_id, prefix_indexes in sorted(by_id.items()):
         non_package_indexes = [

@@ -51,9 +51,9 @@ def test_real_cli_reports_representative_concerns_without_execution_or_artifacts
     assert first.stderr == second.stderr == ""
     assert first.stdout == second.stdout
     document = json.loads(first.stdout)
-    assert document["module_count"] == 6
-    assert document["dependency_count"] == 3
-    assert sorted(f["kind"] for f in document["findings"]) == [
+    assert len(document["sources"]) == 6
+    assert document["views"]["structural"]["dependency_count"] == 3
+    assert sorted(f["kind"] for f in document["views"]["structural"]["findings"]) == [
         "cycle",
         "cycle",
         "unresolved_import",
@@ -71,9 +71,13 @@ def test_real_cli_rejects_partial_analysis_even_when_a_cycle_was_found(
     (tmp_path / "broken.py").write_bytes(bad_source)
     completed = _run(tmp_path)
     assert completed.returncode == 2
-    assert completed.stdout == ""
-    assert "broken.py" in completed.stderr
-    assert "Traceback" not in completed.stderr
+    report = json.loads(completed.stdout)
+    assert report["status"] == "incomplete"
+    assert any(
+        item["path"].endswith("broken.py") for item in report["coverage"]["diagnostics"]
+    )
+    assert report["views"]["structural"]["findings"]
+    assert completed.stderr == ""
 
 
 def test_equivalent_import_spellings_are_normalized(tmp_path: Path) -> None:
@@ -83,13 +87,8 @@ def test_equivalent_import_spellings_are_normalized(tmp_path: Path) -> None:
     absolute = json.loads(_run(tmp_path).stdout)
     _write(tmp_path, "pkg/a.py", "from . import b\n")
     relative = json.loads(_run(tmp_path).stdout)
-    assert (
-        absolute
-        == relative
-        == {
-            "schema_version": "0.5",
-            "module_count": 3,
-            "dependency_count": 1,
-            "findings": [],
-        }
-    )
+    assert absolute == relative
+    assert absolute["schema_version"] == "0.6"
+    assert len(absolute["sources"]) == 3
+    assert absolute["views"]["structural"]["dependency_count"] == 1
+    assert absolute["views"]["structural"]["findings"] == []
