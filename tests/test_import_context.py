@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from benchmarks.reference_adapter import ReferenceFactSource
+from benchmarks.reference_extraction import AstImportFactSource
 from pyarchgraph.composition import ApplicationFactory
 from pyarchgraph.domain.model import SourceModule
 
@@ -16,7 +16,7 @@ def _contexts(tmp_path: Path, source: str, *, package: bool = False):
         .create_fact_source()
         .collect(tmp_path, (SourceModule("opaque-source", "source.py", package, None),))
     )
-    assert result == ReferenceFactSource().collect(
+    assert result == AstImportFactSource().collect(
         tmp_path, (SourceModule("opaque-source", "source.py", package, None),)
     )
     assert not result.diagnostics

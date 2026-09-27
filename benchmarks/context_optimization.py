@@ -15,7 +15,7 @@ from time import perf_counter
 PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 
-from benchmarks.reference_adapter import ReferenceFactSource  # noqa: E402
+from benchmarks.reference_extraction import AstImportFactSource  # noqa: E402
 from pyarchgraph.adapters.discovery import FileSystemSourceDiscovery  # noqa: E402
 from pyarchgraph.composition import ApplicationFactory  # noqa: E402
 
@@ -37,7 +37,7 @@ def main():
             f"Unexpected SymPy inventory diagnostics: {inventory.diagnostics}"
         )
     collectors = {
-        "reference": ReferenceFactSource(),
+        "reference": AstImportFactSource(),
         "optimized": ApplicationFactory().create_fact_source(),
     }
     timings = {name: [] for name in collectors}
