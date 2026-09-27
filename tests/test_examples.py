@@ -27,6 +27,13 @@ MANIFEST = evaluate.load_manifest()
 PROJECTS = {project["id"]: project for project in MANIFEST["projects"]}
 RUNS = [(project["id"], variant_id) for project, variant_id, _ in evaluate.iter_runs()]
 BASELINE = json.loads((EXAMPLES / "review-baseline.json").read_text(encoding="utf-8"))
+# 2026-09-28: Explicit Delivery inheritance updates this fixture; historical
+# hashes remain in review-baseline.json.
+CURRENT_SOURCE_SHA256_OVERRIDES = {
+    "projects/ports_and_adapters/email_adapter.py": (
+        "91fd6965f637bd1d8e09260675ae61d24c70f6505bcd2708c2a0360b2e195f41"
+    ),
+}
 
 
 def _configuration(project_id, variant_id=None):
@@ -206,19 +213,21 @@ def test_manifest_preserves_every_project_and_run():
         assert (EXAMPLES / "projects" / project_id / "README.md").is_file()
 
 
-def test_committed_sources_match_archival_hashes_and_parse_without_execution():
+def test_committed_sources_match_expected_hashes_and_parse_without_execution():
+    assert CURRENT_SOURCE_SHA256_OVERRIDES.keys() <= BASELINE["source_sha256"].keys()
+    expected_hashes = BASELINE["source_sha256"] | CURRENT_SOURCE_SHA256_OVERRIDES
     files = sorted((EXAMPLES / "projects").rglob("*.py"))
     assert len(files) >= 269
     assert {path.relative_to(EXAMPLES).as_posix() for path in files} >= set(
-        BASELINE["source_sha256"]
+        expected_hashes
     )
     for path in files:
-        if path.relative_to(EXAMPLES).as_posix() not in BASELINE["source_sha256"]:
+        if path.relative_to(EXAMPLES).as_posix() not in expected_hashes:
             continue
         source = path.read_bytes()
         assert (
             hashlib.sha256(source).hexdigest()
-            == BASELINE["source_sha256"][path.relative_to(EXAMPLES).as_posix()]
+            == expected_hashes[path.relative_to(EXAMPLES).as_posix()]
         )
         ast.parse(source, filename=str(path))
 

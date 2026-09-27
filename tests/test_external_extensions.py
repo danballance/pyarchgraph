@@ -20,6 +20,7 @@ from pyarchgraph import (
     Severity,
     ViewRegistration,
 )
+from pyarchgraph.domain.strategies import CheckStrategy, GraphViewStrategy
 
 
 def test_external_grouping_and_advisory_check_need_no_core_changes(tmp_path):
@@ -79,7 +80,7 @@ def test_custom_composition_cli_exposes_custom_gate(tmp_path, capsys):
     [(Severity.INFO, 0), (Severity.WARNING, 0), (Severity.ERROR, 1)],
 )
 def test_selected_gate_uses_finding_severity(tmp_path, severity, exit_code):
-    class CustomCheck:
+    class CustomCheck(CheckStrategy):
         def evaluate(self, context):
             return (
                 CheckResult(severity, RuleFinding("review", "Review this project.")),
@@ -126,11 +127,11 @@ def test_incomplete_coverage_takes_precedence_over_check_selection(
 def test_cli_extension_failure_has_context_and_no_report(
     tmp_path, capsys, extension_family
 ):
-    class FailingView:
+    class FailingView(GraphViewStrategy):
         def transform(self, snapshot):
             raise RuntimeError("deliberate failure")
 
-    class FailingCheck:
+    class FailingCheck(CheckStrategy):
         def evaluate(self, context):
             raise RuntimeError("deliberate failure")
 

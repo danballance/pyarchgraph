@@ -13,7 +13,8 @@ from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
 
-from pyarchgraph.model import (
+from pyarchgraph.application.ports import ImportFactSource
+from pyarchgraph.domain.model import (
     Diagnostic,
     FactCollection,
     ImportContext,
@@ -334,7 +335,7 @@ def _collect_import_facts(
             )
 
 
-class AstImportFactSource:
+class AstImportFactSource(ImportFactSource):
     """Collect syntactic import facts without importing or executing code."""
 
     def collect(

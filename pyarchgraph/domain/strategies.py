@@ -61,14 +61,14 @@ class SourceGraphProjection:
         )
 
 
-class StructuralView:
+class StructuralView(GraphViewStrategy):
     def transform(self, snapshot: AnalysisSnapshot) -> ViewGraph:
         return SourceGraphProjection().project(
             snapshot, frozenset(fact.id for fact in snapshot.facts)
         )
 
 
-class NonTypingView:
+class NonTypingView(GraphViewStrategy):
     def transform(self, snapshot: AnalysisSnapshot) -> ViewGraph:
         return SourceGraphProjection().project(
             snapshot,
@@ -78,7 +78,7 @@ class NonTypingView:
         )
 
 
-class ModuleBodyView:
+class ModuleBodyView(GraphViewStrategy):
     def transform(self, snapshot: AnalysisSnapshot) -> ViewGraph:
         return SourceGraphProjection().project(
             snapshot,
@@ -251,14 +251,14 @@ class CycleAnalyzer:
         )
 
 
-class CycleCheck:
+class CycleCheck(CheckStrategy):
     def evaluate(self, context: CheckContext) -> tuple[CheckResult, ...]:
         return tuple(
             CheckResult(Severity.ERROR, finding) for finding in context.cycle_analysis
         )
 
 
-class UnresolvedImportCheck:
+class UnresolvedImportCheck(CheckStrategy):
     def evaluate(self, context: CheckContext) -> tuple[CheckResult, ...]:
         facts = {fact.id: fact for fact in context.facts}
         node_by_source = {

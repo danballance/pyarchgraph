@@ -8,6 +8,7 @@ import pytest
 
 from pyarchgraph.application.analysis import AnalysisService
 from pyarchgraph.application.catalog import BindingReconciler, SourceCatalogBuilder
+from pyarchgraph.application.ports import ImportFactSource, ProjectAccess, SourceDiscovery
 from pyarchgraph.application.scope import LayoutDiagnosticService, TargetReconciler
 from pyarchgraph.application.strategies import (
     CheckRegistration,
@@ -20,6 +21,7 @@ from pyarchgraph.domain.canonicalization import FactCanonicalizer
 from pyarchgraph.domain.catalog import DiscoveryResult
 from pyarchgraph.domain.coverage import CoveragePolicy
 from pyarchgraph.domain.errors import ExtensionError
+from pyarchgraph.domain.graph_algorithms import GraphAlgorithms, GraphHandle
 from pyarchgraph.domain.location import (
     DirectoryLocation,
     ProjectLocation,
@@ -39,7 +41,7 @@ from pyarchgraph.domain.resolution import (
     ArchitectureDependencyPolicy,
     StaticImportResolver,
 )
-from pyarchgraph.domain.strategies import CycleCheck, StructuralView
+from pyarchgraph.domain.strategies import CheckStrategy, CycleCheck, StructuralView
 from pyarchgraph.adapters.discovery import FileSystemSourceDiscovery
 from pyarchgraph.composition import ApplicationFactory
 
@@ -64,7 +66,7 @@ FACT = ImportFact(
 )
 
 
-class MemoryProjectAccess:
+class MemoryProjectAccess(ProjectAccess):
     def __init__(self) -> None:
         self.calls: list[tuple[tuple[Path, ...], Path | None]] = []
 
@@ -88,7 +90,7 @@ class MemoryProjectAccess:
         return DirectoryLocation(root / candidate, False)
 
 
-class MemoryDiscovery:
+class MemoryDiscovery(SourceDiscovery):
     def __init__(self) -> None:
         self.calls: list[tuple[Path, tuple[str, ...], tuple[str, ...]]] = []
 
@@ -103,7 +105,7 @@ class MemoryDiscovery:
         return DiscoveryResult((SOURCE,), (), ())
 
 
-class MemoryFactSource:
+class MemoryFactSource(ImportFactSource):
     def __init__(self) -> None:
         self.collection = FactCollection((FACT,))
 
@@ -115,7 +117,7 @@ class MemoryFactSource:
 
 
 @dataclass(frozen=True)
-class SingletonGraphHandle:
+class SingletonGraphHandle(GraphHandle):
     nodes: tuple[str, ...]
     edges: tuple[tuple[str, str], ...]
 
@@ -130,7 +132,7 @@ class SingletonGraphHandle:
         return ((start, start),)
 
 
-class SingletonGraphAlgorithms:
+class SingletonGraphAlgorithms(GraphAlgorithms):
     def __init__(self) -> None:
         self.handles: list[SingletonGraphHandle] = []
 
@@ -142,7 +144,7 @@ class SingletonGraphAlgorithms:
         return handle
 
 
-class FailableCheck:
+class FailableCheck(CheckStrategy):
     def __init__(self) -> None:
         self.fail = False
 
@@ -259,7 +261,7 @@ def test_captured_base_survives_cwd_changes_and_reused_service_root_failure(
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
 
-    class RelocatingDiscovery:
+    class RelocatingDiscovery(SourceDiscovery):
         def discover(self, root, *, excludes=(), pruned_directories=()):
             result = FileSystemSourceDiscovery().discover(
                 root, excludes=excludes, pruned_directories=pruned_directories

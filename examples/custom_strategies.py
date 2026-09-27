@@ -15,6 +15,8 @@ from pyarchgraph import (
     CheckContext,
     CheckRegistration,
     CheckResult,
+    CheckStrategy,
+    GraphViewStrategy,
     RuleFinding,
     Severity,
     ViewEdge,
@@ -25,7 +27,7 @@ from pyarchgraph import (
 )
 
 
-class PackageGroupingView:
+class PackageGroupingView(GraphViewStrategy):
     """Group by top-level import name, dropping internal group dependencies."""
 
     def transform(self, snapshot: AnalysisSnapshot) -> ViewGraph:
@@ -67,7 +69,7 @@ class PackageGroupingView:
 
 
 @dataclass(frozen=True)
-class GroupSizeCheck:
+class GroupSizeCheck(CheckStrategy):
     maximum_sources: int = 20
 
     def evaluate(self, context: CheckContext) -> tuple[CheckResult, ...]:

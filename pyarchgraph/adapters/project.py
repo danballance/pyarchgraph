@@ -5,6 +5,7 @@ import os
 import tomllib
 from pathlib import Path
 
+from pyarchgraph.application.ports import ProjectAccess
 from pyarchgraph.domain.errors import AnalysisError
 from pyarchgraph.domain.location import (
     DirectoryLocation,
@@ -13,7 +14,7 @@ from pyarchgraph.domain.location import (
 )
 
 
-class FileSystemProjectAccess:
+class FileSystemProjectAccess(ProjectAccess):
     """Capture one base directory and keep all physical path operations outside core."""
 
     def locate(

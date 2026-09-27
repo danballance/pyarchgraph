@@ -41,7 +41,7 @@
         "outcome": "pass",
         "exit_code": 0,
         "module_count": 5,
-        "dependency_count": 6,
+        "dependency_count": 7,
         "findings": [],
         "status": "complete"
       },
@@ -54,6 +54,10 @@
           [
             "composition",
             "email_adapter"
+          ],
+          [
+            "email_adapter",
+            "ports"
           ]
         ],
         "absent_dependencies": [

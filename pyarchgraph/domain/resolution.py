@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from collections.abc import Mapping
 from types import MappingProxyType
 from pathlib import PurePosixPath
+from typing import Protocol
 
 from pyarchgraph.domain.model import (
     DependencyEdge,
@@ -394,7 +395,19 @@ class _ResolutionSession:
         )
 
 
-class StaticImportResolver:
+class ImportResolver(Protocol):
+    def resolve(
+        self,
+        facts: tuple[ImportFact, ...],
+        modules: tuple[SourceModule, ...],
+        namespace_prefixes: tuple[str, ...] = (),
+        *,
+        owned_prefixes: tuple[str, ...] = (),
+        targets: tuple[TargetDeclaration, ...] = (),
+    ) -> ResolutionResult: ...
+
+
+class StaticImportResolver(ImportResolver):
     """Resolve facts from declared bindings without inspecting installed packages."""
 
     def resolve(

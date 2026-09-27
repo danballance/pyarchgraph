@@ -18,7 +18,6 @@ from pyarchgraph.application.analysis import AnalysisService
 from pyarchgraph.application.catalog import BindingReconciler, SourceCatalogBuilder
 from pyarchgraph.application.ports import (
     ImportFactSource,
-    ImportResolver,
     ProjectAccess,
     ProjectAnalyzer,
     SourceDiscovery,
@@ -36,6 +35,7 @@ from pyarchgraph.domain.coverage import CoveragePolicy
 from pyarchgraph.domain.graph_algorithms import GraphAlgorithms
 from pyarchgraph.domain.resolution import (
     ArchitectureDependencyPolicy,
+    ImportResolver,
     StaticImportResolver,
 )
 from pyarchgraph.domain.strategies import (

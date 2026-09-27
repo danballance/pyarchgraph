@@ -13,10 +13,7 @@ from pyarchgraph.domain.model import (
     AnalysisOptions,
     AnalysisReport,
     FactCollection,
-    ImportFact,
-    ResolutionResult,
     SourceModule,
-    TargetDeclaration,
 )
 
 
@@ -54,15 +51,3 @@ class ProjectAccess(Protocol):
     def absolute(self, path: str, base_dir: Path) -> Path: ...
     def read_metadata(self, root: Path) -> ProjectMetadata: ...
     def directory(self, root: Path, candidate: str) -> DirectoryLocation: ...
-
-
-class ImportResolver(Protocol):
-    def resolve(
-        self,
-        facts: tuple[ImportFact, ...],
-        modules: tuple[SourceModule, ...],
-        namespace_prefixes: tuple[str, ...] = (),
-        *,
-        owned_prefixes: tuple[str, ...] = (),
-        targets: tuple[TargetDeclaration, ...] = (),
-    ) -> ResolutionResult: ...

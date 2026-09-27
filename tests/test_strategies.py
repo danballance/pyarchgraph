@@ -20,6 +20,7 @@ from pyarchgraph.domain.graph import (
     ViewGraph,
     ViewNode,
 )
+from pyarchgraph.domain.graph_algorithms import GraphAlgorithms, GraphHandle
 from pyarchgraph.domain.model import (
     CheckResult,
     DependencyEdge,
@@ -37,7 +38,9 @@ from pyarchgraph.domain.model import (
     UnresolvedReason,
 )
 from pyarchgraph.domain.strategies import (
+    CheckStrategy,
     CycleCheck,
+    GraphViewStrategy,
     NonTypingView,
     StructuralView,
     UnresolvedImportCheck,
@@ -107,7 +110,7 @@ def _engine(registry=None):
     return StrategyEngine(registry or _registry(), NetworkXGraphAlgorithms())
 
 
-class AdvisoryCheck:
+class AdvisoryCheck(CheckStrategy):
     def evaluate(self, context):
         return (
             CheckResult(
@@ -122,7 +125,7 @@ class AdvisoryCheck:
         )
 
 
-class GroupedView:
+class GroupedView(GraphViewStrategy):
     """An external view can project sources without changing the engine."""
 
     def __init__(self, groups, *, self_loops=False):
@@ -272,7 +275,7 @@ def test_grouping_can_drop_internal_edges_or_explicitly_retain_self_loops():
     assert results["keep"].findings[0].finding.members == ("group",)
 
 
-class AlteredView:
+class AlteredView(GraphViewStrategy):
     def __init__(self, alter):
         self.alter = alter
 
@@ -347,7 +350,7 @@ def test_invalid_graph_and_fabricated_provenance_raise_chained_extension_errors(
     assert caught.value.__cause__ is not None
 
 
-class ObservingCheck:
+class ObservingCheck(CheckStrategy):
     def __init__(self):
         self.contexts = []
 
@@ -410,7 +413,7 @@ def test_aggregate_unresolved_findings_retain_source_and_view_node():
     assert finding.finding.evidence[0].source == "a"
 
 
-class FailingCheck:
+class FailingCheck(CheckStrategy):
     def __init__(self):
         self.fail = True
 
@@ -445,7 +448,7 @@ def test_engine_reuse_after_success_and_failure_does_not_retain_results():
     ],
 )
 def test_invalid_check_outputs_raise_contextual_extension_errors(output):
-    class InvalidCheck:
+    class InvalidCheck(CheckStrategy):
         def evaluate(self, context):
             return output
 
@@ -459,7 +462,7 @@ def test_invalid_check_outputs_raise_contextual_extension_errors(output):
 def test_views_receive_the_same_independent_normalized_snapshot():
     seen = []
 
-    class Observer:
+    class Observer(GraphViewStrategy):
         def transform(self, snapshot):
             seen.append(snapshot)
             return StructuralView().transform(snapshot)
@@ -488,14 +491,14 @@ def test_views_receive_the_same_independent_normalized_snapshot():
 
 
 def test_core_engine_uses_injected_graph_algorithm_port():
-    class Handle:
+    class Handle(GraphHandle):
         def strongly_connected_components(self):
             return (("a",), ("b",))
 
         def bounded_witness(self, members, *, start):
             raise AssertionError("acyclic graph should not query a witness")
 
-    class Algorithms:
+    class Algorithms(GraphAlgorithms):
         def __init__(self):
             self.calls = []
 
@@ -537,7 +540,7 @@ def test_malformed_registry_values_raise_analysis_errors(arguments):
         StrategyRegistry(**defaults)
 
 
-class OutputCheck:
+class OutputCheck(CheckStrategy):
     def __init__(self, output):
         self.output = output
 
@@ -764,7 +767,7 @@ def test_graph_adapter_preserves_domain_provided_witness_traversal_order():
 
 
 def test_domain_supplies_sorted_edges_and_witness_start_to_graph_port():
-    class RecordingHandle:
+    class RecordingHandle(GraphHandle):
         def __init__(self, handle, calls):
             self.handle = handle
             self.calls = calls
@@ -776,7 +779,7 @@ def test_domain_supplies_sorted_edges_and_witness_start_to_graph_port():
             self.calls.append((members, start))
             return self.handle.bounded_witness(members, start=start)
 
-    class RecordingAlgorithms:
+    class RecordingAlgorithms(GraphAlgorithms):
         def __init__(self):
             self.prepared = []
             self.witnesses = []
@@ -801,7 +804,7 @@ def test_domain_supplies_sorted_edges_and_witness_start_to_graph_port():
 
 
 def test_reused_engine_rebuilds_provenance_after_success_and_view_failure():
-    class RememberingView:
+    class RememberingView(GraphViewStrategy):
         def __init__(self):
             self.previous = None
 

@@ -187,8 +187,10 @@ registries live in `application`; filesystem, AST, TOML, NetworkX, CLI, and JSON
 implementations live in `adapters`. `ApplicationFactory` wires those parts.
 
 Supply Python objects implementing `GraphViewStrategy.transform(snapshot)` or
-`CheckStrategy.evaluate(context)` to the factory registry. Both use structural
-protocols, so subclassing and a dependency injection framework are unnecessary.
+`CheckStrategy.evaluate(context)` to the factory registry. Built-in implementations
+and the supplied examples explicitly inherit their protocols so their contracts
+are visible in class declarations. Both protocols still support structural typing:
+external implementations can provide the required methods without subclassing.
 Return the public frozen graph and finding dataclasses with immutable tuples;
 extra-field subclasses are rejected by output validation.
 Each view receives the same normalized immutable snapshot. View validation

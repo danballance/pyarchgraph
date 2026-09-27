@@ -5,10 +5,13 @@ checks 40 real CLI invocations over 31 small projects against independently
 specified expectations in `manifest.json` (manifest schema 3). It never executes
 fixture application code.
 
-The original 25 projects preserve their source bytes and archival hashes in
-`review-baseline.json`. Their original structural expectations remain, with the
-wrong-root scenario now returning an incomplete JSON report. Four extra view
-variants exercise the existing typing-only and deferred-import cycles.
+The original 25 projects retain their archival hashes and observations in
+`review-baseline.json`. On 2026-09-28, the ports-and-adapters email adapter was
+updated to inherit its delivery protocol explicitly, adding a seventh dependency.
+Its current source hash is recorded as an explicit override in the corpus
+integrity test; all other original source hashes remain enforced. The wrong-root
+scenario now returns an incomplete JSON report. Four extra view variants exercise
+the existing typing-only and deferred-import cycles.
 
 Six new projects cover multiple roots, unusual source filenames, partial analysis,
 shared namespace ownership, acknowledged native implementation boundaries and

@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from pyarchgraph.application.catalog import SourceCatalogBuilder
-from pyarchgraph.application.ports import ImportResolver, ProjectAccess
+from pyarchgraph.application.ports import ProjectAccess, ProjectAnalyzer
 from pyarchgraph.application.scope import LayoutDiagnosticService, TargetReconciler
 from pyarchgraph.application.strategies import StrategyEngine
 from pyarchgraph.application.validation import OptionValidator
@@ -17,10 +17,10 @@ from pyarchgraph.domain.model import (
     Diagnostic,
     Severity,
 )
-from pyarchgraph.domain.resolution import ArchitectureDependencyPolicy
+from pyarchgraph.domain.resolution import ArchitectureDependencyPolicy, ImportResolver
 
 
-class AnalysisService:
+class AnalysisService(ProjectAnalyzer):
     """Reusable configuration; all mutable observations are local to an analysis."""
 
     def __init__(

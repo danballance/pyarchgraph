@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
+from pyarchgraph.application.ports import ImportFactSource
 from pyarchgraph.domain.canonicalization import FactCanonicalizer
 from pyarchgraph.domain.model import (
     Diagnostic,
@@ -41,7 +42,7 @@ class NonRegularSourceError(OSError):
     """The input is not a regular source file."""
 
 
-class SourceReader:
+class SourceReader(SourceTextReader):
     """Read decoded Python source, following only regular file symlinks."""
 
     def read(self, path: Path) -> str:
@@ -52,7 +53,7 @@ class SourceReader:
             return source_file.read()
 
 
-class PythonAstParser:
+class PythonAstParser(AstParser):
     """Parse source without importing or executing it."""
 
     def parse(self, source: str, filename: str) -> ast.Module:
@@ -88,7 +89,7 @@ class _SourceText:
         ).decode("utf-8")
 
 
-class ModuleImportExtractor:
+class ModuleImportExtractor(ImportExtractor):
     """Collect explicit import facts and their syntactic contexts."""
 
     def _typing_aliases(self, tree: ast.Module) -> tuple[set[str], set[str]]:
@@ -267,7 +268,7 @@ class ModuleImportExtractor:
                 )
 
 
-class AstImportFactSource:
+class AstImportFactSource(ImportFactSource):
     """Collect syntactic import facts without importing or executing code."""
 
     def __init__(

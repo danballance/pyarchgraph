@@ -2,10 +2,10 @@
 
 import networkx as nx
 
-from pyarchgraph.domain.graph_algorithms import GraphHandle
+from pyarchgraph.domain.graph_algorithms import GraphAlgorithms, GraphHandle
 
 
-class NetworkXGraphHandle:
+class NetworkXGraphHandle(GraphHandle):
     def __init__(
         self, nodes: tuple[str, ...], edges: tuple[tuple[str, str], ...]
     ) -> None:
@@ -28,7 +28,7 @@ class NetworkXGraphHandle:
         return tuple(nx.find_cycle(self._graph.subgraph(members), source=start))
 
 
-class NetworkXGraphAlgorithms:
+class NetworkXGraphAlgorithms(GraphAlgorithms):
     def prepare(
         self, nodes: tuple[str, ...], edges: tuple[tuple[str, str], ...]
     ) -> GraphHandle:

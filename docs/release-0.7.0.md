@@ -29,6 +29,10 @@ under `domain`, `application`, or `adapters`. Core services use injected protoco
 only `composition.py` chooses concrete adapters. Services can be reused because
 per-analysis mutable state belongs to private sessions.
 
+Implementations explicitly inherit their protocols. `ImportResolver` is defined
+in `pyarchgraph.domain.resolution`; import it there rather than from
+`pyarchgraph.application.ports`.
+
 Read views by exact registered IDs: `report.views["non-typing"]`. The default
 IDs remain `structural`, `non-typing`, and `module-body`; underscores are not
 aliases. Select a custom registered ID through `AnalysisOptions(gate=...)`.
@@ -65,9 +69,11 @@ opt-in through `details="component-edges"`.
 
 ## Extension registration
 
-View and check objects implement independent protocols; no inheritance is
-required. Returned graphs and findings use the public frozen dataclasses, with
-immutable tuple collections. Dataclass subclasses with extra fields are rejected
+View and check objects implement independent protocols. Built-ins and supplied
+examples explicitly inherit them; external implementations can still use
+structural typing without inheritance. Returned graphs and findings use the
+public frozen dataclasses, with immutable tuple collections. Dataclass subclasses
+with extra fields are rejected
 to keep the schema and validation contract fixed. Register strategy objects
 through `ApplicationFactory` or an immutable
 `StrategyRegistry`. Defaults preserve all three existing views and checks
@@ -89,10 +95,12 @@ of which checks are enabled. Coverage validation cannot be removed. Extension
 exceptions and invalid outputs raise chained `ExtensionError` identifying the
 extension and its view.
 
-See [the external example](../examples/custom_strategies.py). The frozen fixture
-applications, archived research artifacts, and extraction reference are retained
-unchanged. Active tests, evaluator, benchmarks, and replay instrumentation target
-0.7. The reference loader adapts its old model import in memory only.
+See [the external example](../examples/custom_strategies.py). Historical research
+artifacts retain their original observations and hashes. The delivery fixture and
+reference collector now declare their protocols explicitly; the collector also
+imports the current domain models directly. The fixture's current hash and added
+dependency are recorded separately from the historical baseline. Active tests,
+evaluator, benchmarks, and replay instrumentation target 0.7.
 
 [Verification record](verification-0.7.md) contains the supported Python matrix,
 corpus, packaging, replay, and paired benchmark results and commands.

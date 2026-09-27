@@ -9,6 +9,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
+from pyarchgraph.application.ports import SourceDiscovery
 from pyarchgraph.domain.catalog import DiscoveryResult
 from pyarchgraph.domain.model import (
     Diagnostic,
@@ -23,7 +24,7 @@ DEFAULT_EXCLUDED_DIRECTORY_BASENAMES = frozenset(
 )
 
 
-class FileSystemSourceDiscovery:
+class FileSystemSourceDiscovery(SourceDiscovery):
     """Inventory files and bindings without importing target code."""
 
     def discover(
