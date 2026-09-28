@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A readable guide to PyArchGraph's domain, application, adapters, and architecture vocabulary.">
+<title>Package guides · PyArchGraph</title>
+<style>
+:root { color-scheme: light; --ink: #172b31; --muted: #52656a; --paper: #fff; --wash: #f5f7f6; --line: #dbe3e1; --accent: #12685f; --tint: #eaf5f1; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--wash); color: var(--ink); font: 16px/1.65 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+a { color: var(--accent); text-underline-offset: .2em; }
+a:hover { text-decoration-thickness: 2px; }
+a:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 2px; }
+.skip { position: absolute; left: 1rem; top: -6rem; padding: .5rem 1rem; background: var(--paper); }
+.skip:focus { top: .5rem; }
+.topbar { background: var(--paper); border-bottom: 1px solid var(--line); }
+.topbar-inner { max-width: 1200px; margin: auto; padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.brand { color: var(--ink); text-decoration: none; font-weight: 700; letter-spacing: -.02em; }
+.brand span { font-size: .8rem; font-weight: 450; color: var(--muted); margin-left: .7rem; }
+.repository { font-size: .88rem; }
+main { max-width: 1200px; margin: auto; padding: 3rem 2rem 4rem; }
+.eyebrow { font-size: .72rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--accent); margin: 0 0 .8rem; }
+h1, h2, h3 { line-height: 1.2; font-weight: 650; letter-spacing: -.035em; }
+h1 { max-width: 16ch; font-size: clamp(2.8rem, 7vw, 4.8rem); margin: .3rem 0 1rem; }
+h2 { font-size: 1.8rem; margin: 0 0 1rem; }
+h3 { font-size: 1.3rem; margin: .3rem 0 .7rem; }
+.lede { max-width: 43rem; font-size: 1.23rem; line-height: 1.5; margin: 0 0 2rem; }
+.route { max-width: 52rem; margin: 0 0 2.5rem; padding: 1rem 1.2rem; background: var(--tint); border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; }
+.route h2 { font-size: 1rem; letter-spacing: -.015em; margin-bottom: .5rem; }
+.route p { margin: 0; }
+.guides { border-top: 1px solid var(--line); padding-top: 2rem; }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 1.5rem; }
+.card .eyebrow { margin-bottom: .5rem; }
+.card p:last-child { color: var(--muted); margin: 0; max-width: 45ch; }
+footer { border-top: 1px solid var(--line); margin-top: 2.5rem; padding-top: 1.2rem; color: var(--muted); font-size: .85rem; }
+@media (max-width: 650px) {
+  .topbar-inner { padding: 1rem 1.1rem; }
+  .brand span { margin-left: .35rem; }
+  main { padding: 1.8rem 1.1rem 2rem; }
+  .lede { font-size: 1.08rem; }
+  .cards { grid-template-columns: 1fr; }
+  .card { padding: 1.2rem; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar"><div class="topbar-inner">
+<a class="brand" href="index.html" aria-current="page">PyArchGraph <span>Package guides</span></a>
+<a class="repository" href="https://github.com/danballance/pyarchgraph">Project on GitHub ↗</a>
+</div></header>
+<main id="main">
+<p class="eyebrow">Architecture &amp; implementation</p>
+<h1>Explore how PyArchGraph works.</h1>
+<p class="lede">Follow Python imports from source files to dependency graphs and findings, and see how the packages fit together.</p>
+<aside class="route" aria-labelledby="reading-route">
+<h2 id="reading-route">A suggested reading route</h2>
+<p>Start with the <a href="domain.html">domain</a> rules, follow the <a href="application.html">application</a> workflow, then explore the <a href="adapters.html">adapters</a> that connect it to the outside world. Keep the <a href="glossary.html">glossary</a> nearby for unfamiliar terms.</p>
+</aside>
+<section class="guides" aria-labelledby="guides-title">
+<h2 id="guides-title">Package guides</h2>
+<div class="cards">
+<article class="card">
+<p class="eyebrow">01 · Rules &amp; models</p>
+<h3><a href="domain.html">Domain</a></h3>
+<p>Understand source identities, import resolution, graph views, checks, and the rules for complete analysis.</p>
+</article>
+<article class="card">
+<p class="eyebrow">02 · Workflow &amp; contracts</p>
+<h3><a href="application.html">Application</a></h3>
+<p>Follow requests through source collection, catalogue assembly, strategy coordination, and reports.</p>
+</article>
+<article class="card">
+<p class="eyebrow">03 · Connections &amp; tools</p>
+<h3><a href="adapters.html">Adapters</a></h3>
+<p>Explore CLI input and output, filesystem discovery, Python syntax parsing, and NetworkX graph operations.</p>
+</article>
+<article class="card">
+<p class="eyebrow">Reference · Vocabulary</p>
+<h3><a href="glossary.html">Glossary</a></h3>
+<p>Look up plain-language definitions of sources, import facts, resolution, views, findings, and architecture terms.</p>
+</article>
+</div>
+</section>
+<footer>Looking to run PyArchGraph? See the <a href="https://github.com/danballance/pyarchgraph#readme">README and usage examples</a>.</footer>
+</main>
+</body>
+</html>

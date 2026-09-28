@@ -4,6 +4,19 @@ Check a Python project's explicit import dependencies for cycles and missing
 internal targets. Source is parsed, never executed. Reports describe the selected
 source scope and its coverage; they do not certify runtime import safety.
 
+## Documentation
+
+Browse the [documentation site](https://danballance.github.io/pyarchgraph/) for
+the domain, application and adapter guides, plus the terminology glossary.
+You can also open [the documentation index](docs/index.html) locally in a browser.
+
+The `Publish documentation` workflow publishes the HTML guides on every push to
+`main`, including merged pull requests, and can be run manually from the Actions
+tab. To enable it, select **GitHub Actions** under the repository's
+**Settings → Pages → Build and deployment → Source**. No extra secrets are needed.
+The workflow stages only `docs/*.html`; links to source files and Markdown open
+on GitHub at the deployed commit, while guide navigation stays within the site.
+
 ## Run
 
 Python 3.11 or newer is required, except CPython 3.14.1. Use an interpreter that
