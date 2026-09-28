@@ -7,7 +7,11 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 
 from pyarchgraph.application.exceptions import AnalysisError, ExtensionError
-from pyarchgraph.application.results import RegisteredFinding, ViewReport
+from pyarchgraph.application.results import (
+    RegisteredFinding,
+    ReportDependency,
+    ViewReport,
+)
 from pyarchgraph.domain.graph import AnalysisSnapshot, CheckContext
 from pyarchgraph.domain.graph_algorithms import GraphAlgorithms
 from pyarchgraph.domain.models import Details
@@ -15,9 +19,11 @@ from pyarchgraph.domain.strategies import (
     CheckStrategy,
     CycleAnalyzer,
     CycleCheck,
+    EvidenceInterpreter,
     GraphViewStrategy,
     ModuleBodyView,
     NonTypingView,
+    PackageView,
     StructuralView,
     UnresolvedImportCheck,
 )
@@ -34,6 +40,7 @@ class ViewRegistration:
 
     id: str
     strategy: GraphViewStrategy
+    report_dependencies: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,12 +109,38 @@ class StrategyRegistry:
         by_id = {check.id: check for check in self.checks}
         return tuple(by_id[check_id] for check_id in selected)
 
+    def for_run(self, *, package_max_depth: int | None = None) -> StrategyRegistry:
+        """Configure built-in package views without changing stored registrations."""
+        if package_max_depth is None:
+            return self
+        if type(package_max_depth) is not int or package_max_depth < 1:
+            raise AnalysisError("package_max_depth must be a positive integer or null")
+        views = tuple(
+            replace(
+                view,
+                strategy=replace(view.strategy, max_depth=package_max_depth),
+            )
+            if type(view.strategy) is PackageView
+            else view
+            for view in self.views
+        )
+        if all(
+            original is configured for original, configured in zip(self.views, views)
+        ):
+            return self
+        return replace(self, views=views)
+
     def _validate_registrations(self) -> None:
         reserved_views = {
             "structural": StructuralView,
             "non-typing": NonTypingView,
             "module-body": ModuleBodyView,
         }
+        package_sources = {
+            "package-" + view_id: strategy_type
+            for view_id, strategy_type in reserved_views.items()
+        }
+        reserved_views.update({view_id: PackageView for view_id in package_sources})
         reserved_checks = {
             "cycles": CycleCheck,
             "unresolved-imports": UnresolvedImportCheck,
@@ -137,6 +170,15 @@ class StrategyRegistry:
                     and type(entry.strategy) is not reserved[entry.id]
                 ):
                     raise AnalysisError(f"reserved extension ID {entry.id!r}")
+                if isinstance(entry, ViewRegistration):
+                    if type(entry.report_dependencies) is not bool:
+                        raise AnalysisError("report_dependencies must be a boolean")
+                    if (
+                        entry.id in package_sources
+                        and type(entry.strategy.source_view)
+                        is not package_sources[entry.id]
+                    ):
+                        raise AnalysisError(f"reserved extension ID {entry.id!r}")
                 if not callable(getattr(entry.strategy, method, None)):
                     raise AnalysisError(
                         f"extension {entry.id!r} must implement {method}()"
@@ -202,16 +244,22 @@ class StrategyEngine:
         self._cycles = CycleAnalyzer(graph_algorithms)
         self._graphs = GraphValidator()
         self._results = CheckResultValidator()
+        self._evidence = EvidenceInterpreter()
 
     def evaluate(
-        self, snapshot: AnalysisSnapshot, *, details: Details = "summary"
+        self,
+        snapshot: AnalysisSnapshot,
+        *,
+        details: Details = "summary",
+        package_max_depth: int | None = None,
     ) -> Mapping[str, ViewReport]:
         if details not in ("summary", "component-edges"):
             raise AnalysisError("details must be 'summary' or 'component-edges'")
+        registry = self.registry.for_run(package_max_depth=package_max_depth)
         snapshot = SnapshotNormalizer().normalize(snapshot)
         graphs = self._graphs.prepare(snapshot)
         views = {}
-        for registration in self.registry.views:
+        for registration in registry.views:
             try:
                 graph = graphs.normalize(registration.strategy.transform(snapshot))
             except Exception as error:
@@ -246,7 +294,7 @@ class StrategyEngine:
                 cycle_analysis=cycles,
                 details=details,
             )
-            selected = self.registry.selected_checks(registration.id)
+            selected = registry.selected_checks(registration.id)
             findings = []
             for check in selected:
                 try:
@@ -260,6 +308,16 @@ class StrategyEngine:
                     RegisteredFinding(check.id, result.severity, result.finding)
                     for result in results
                 )
+            dependencies = None
+            if registration.report_dependencies:
+                facts_by_id = {fact.id: fact for fact in facts}
+                dependencies = tuple(
+                    ReportDependency(item.source, item.target, item.evidence)
+                    for item in (
+                        self._evidence.dependency(edge, facts_by_id)
+                        for edge in graph.dependencies
+                    )
+                )
             views[registration.id] = ViewReport(
                 nodes=graph.nodes,
                 enabled_check_ids=tuple(check.id for check in selected),
@@ -267,5 +325,6 @@ class StrategyEngine:
                 cyclic_dependency_count=sum(cycle.dependency_count for cycle in cycles),
                 cyclic_node_count=sum(len(cycle.members) for cycle in cycles),
                 findings=tuple(findings),
+                dependencies=dependencies,
             )
         return MappingProxyType(views)

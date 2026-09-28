@@ -88,8 +88,13 @@ class AnalyseProject(ProjectAnalyzer):
             dependencies=self.dependency_policy.select(resolution.dependencies),
             external_imports=resolution.external_imports,
             unresolved_imports=resolution.unresolved_imports,
+            resolved_dependencies=resolution.dependencies,
         )
-        views = self.strategies.evaluate(snapshot, details=options.details)
+        views = self.strategies.evaluate(
+            snapshot,
+            details=options.details,
+            package_max_depth=options.package_max_depth,
+        )
         final_diagnostics = self.coverage.diagnostics(tuple(diagnostics))
         return AnalysisReport(
             status="complete"

@@ -134,14 +134,21 @@ def check_result(
         "views",
     }:
         return [*errors, "report has an invalid top-level contract"]
-    if report["schema_version"] != "0.7":
-        errors.append("schema_version must be '0.7'")
+    if report["schema_version"] != "0.8":
+        errors.append("schema_version must be '0.8'")
     if report["status"] != expected["status"]:
         errors.append(
             f"status is {report['status']!r}, expected {expected['status']!r}"
         )
-    if set(report["views"]) != {"structural", "non-typing", "module-body"}:
-        return [*errors, "report must contain exactly the three graph views"]
+    if set(report["views"]) != {
+        "structural",
+        "non-typing",
+        "module-body",
+        "package-structural",
+        "package-non-typing",
+        "package-module-body",
+    }:
+        return [*errors, "report must contain exactly the six graph views"]
     actual_codes = {item["code"] for item in report["coverage"]["diagnostics"]}
     for code in expected.get("diagnostics", []):
         if code not in actual_codes:

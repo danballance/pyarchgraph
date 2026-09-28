@@ -1,8 +1,9 @@
-"""Replay frozen research scopes and audit fresh schema 0.7 JSON artifacts.
+"""Replay frozen research scopes and audit fresh schema 0.8 JSON artifacts.
 
 Target code is parsed, never imported, installed or executed. Archived research
 files are read-only. The worker invokes the real CLI and observes its graph
-input for supplementary comparisons; that graph is not an independent oracle.
+input for supplementary comparisons. Package graphs come from reported
+dependencies; neither graph observation is an independent edge oracle.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
 ARCHIVE = PROJECT / "docs/validation/2026-09-26"
-OUTPUT = PROJECT / "docs/validation/0.7"
+OUTPUT = PROJECT / "docs/validation/0.8"
 
 
 def write_json(path, value):
@@ -59,12 +60,16 @@ def analyzer_hashes():
 
 
 def source_labels(report):
-    return {
+    labels = {
         source["id"]: source["import_name"]
         if source["import_name"] and source["binding_status"] == "bound"
         else "path:" + source["path"]
         for source in report["sources"]
     }
+    for view in report["views"].values():
+        for node in view["nodes"]:
+            labels.setdefault(node["id"], node["label"])
+    return labels
 
 
 def worker(case):
@@ -77,7 +82,7 @@ def worker(case):
     self_evidence = []
     original = StrategyEngine.evaluate
 
-    def capture(self, snapshot, *, details="summary"):
+    def capture(self, snapshot, *, details="summary", package_max_depth=None):
         dependencies, facts = snapshot.dependencies, snapshot.facts
         by_id = {fact.id: fact for fact in facts}
         filters = {
@@ -110,13 +115,17 @@ def worker(case):
                         ],
                     }
                 )
-        return original(self, snapshot, details=details)
+        return original(
+            self, snapshot, details=details, package_max_depth=package_max_depth
+        )
 
     StrategyEngine.evaluate = capture
     os.chdir(case["cwd"])
     arguments = list(case["roots"])
     for pattern in case["excludes"]:
         arguments.extend(("--exclude", pattern))
+    if case.get("package_max_depth") is not None:
+        arguments.extend(("--package-max-depth", str(case["package_max_depth"])))
     stdout, stderr = io.StringIO(), io.StringIO()
     profile = cProfile.Profile() if case.get("profile") else None
     with tempfile.TemporaryDirectory(prefix="pyarchgraph-replay-") as temporary:
@@ -147,6 +156,11 @@ def worker(case):
     report = json.loads(payload) if payload else None
     if report:
         names = source_labels(report)
+        for name, view in report["views"].items():
+            if name not in graphs and view["dependencies"] is not None:
+                graphs[name] = [
+                    [edge["source"], edge["target"]] for edge in view["dependencies"]
+                ]
         graphs = {
             name: [[names[source], names[target]] for source, target in edges]
             for name, edges in graphs.items()
@@ -160,6 +174,12 @@ def worker(case):
         "stderr": stderr.getvalue(),
         "report": report,
         "graphs": graphs,
+        "graph_observation_sources": {
+            name: "reported_dependencies"
+            if name.startswith("package-")
+            else "analysis_snapshot"
+            for name in graphs
+        },
         "self_edges": self_evidence,
         "analyzer_source_sha256": hashes_before,
         "analyzer_source_unchanged_during_run": hashes_before == analyzer_hashes(),
@@ -281,6 +301,10 @@ def audit_report(case, result):
         }
     names = source_labels(report)
     sources = {source["id"]: source for source in report["sources"]}
+    memberships = {
+        name: {node["id"]: set(node["members"]) for node in view["nodes"]}
+        for name, view in report["views"].items()
+    }
     gate = report["gate"]
     expected_exit = (
         2
@@ -298,7 +322,9 @@ def audit_report(case, result):
         errors.append("unexpected stderr accompanying report")
     cache = {}
 
-    def evidence_list(evidence, source_id=None, view_name="structural"):
+    def evidence_list(
+        evidence, source_id=None, view_name="structural", *, target_id=None
+    ):
         nonlocal checked
         if not evidence:
             errors.append("empty evidence list")
@@ -307,11 +333,24 @@ def audit_report(case, result):
             errors.append("duplicate displayed evidence")
         for item in evidence:
             checked += 1
-            if source_id is not None and item["path"] != sources[source_id]["path"]:
-                errors.append("evidence path does not belong to dependency source")
-            if view_name != "structural" and item["context"]["typing_only"]:
+            if source_id is not None:
+                source_members = memberships[view_name].get(source_id, {source_id})
+                original_source = item.get("source", source_id)
+                if original_source not in source_members:
+                    errors.append("evidence source does not belong to dependency node")
+                if (
+                    original_source not in sources
+                    or item["path"] != sources[original_source]["path"]
+                ):
+                    errors.append("evidence path does not belong to dependency source")
+            if target_id is not None:
+                target_members = memberships[view_name].get(target_id, {target_id})
+                if item.get("target", target_id) not in target_members:
+                    errors.append("evidence target does not belong to dependency node")
+            context_view = view_name.removeprefix("package-")
+            if context_view != "structural" and item["context"]["typing_only"]:
                 errors.append(f"{view_name}: typing-only evidence survived filter")
-            if view_name == "module-body" and item["context"]["in_function"]:
+            if context_view == "module-body" and item["context"]["in_function"]:
                 errors.append("module_body: deferred evidence survived filter")
             if item["context"]["package_initializer"] != (
                 Path(item["path"]).name == "__init__.py"
@@ -366,6 +405,37 @@ def audit_report(case, result):
         )
         if cyclic_edges != view["cyclic_dependency_count"]:
             errors.append(f"{view_name}: cyclic dependency count mismatch")
+        dependencies = view.get("dependencies")
+        if view_name.startswith("package-") and dependencies is None:
+            errors.append(f"{view_name}: full package dependencies are missing")
+        if dependencies is not None:
+            displayed_pairs = [
+                (
+                    names.get(edge["source"], edge["source"]),
+                    names.get(edge["target"], edge["target"]),
+                )
+                for edge in dependencies
+            ]
+            if len(displayed_pairs) != len(set(displayed_pairs)):
+                errors.append(f"{view_name}: duplicate reported dependencies")
+            if set(displayed_pairs) != pair_set:
+                errors.append(
+                    f"{view_name}: full dependencies do not cover its graph edges"
+                )
+            for edge in dependencies:
+                if (
+                    not {edge["source"], edge["target"]}
+                    <= memberships[view_name].keys()
+                ):
+                    errors.append(
+                        f"{view_name}: dependency endpoint is not a view node"
+                    )
+                evidence_list(
+                    edge["evidence"],
+                    edge["source"],
+                    view_name,
+                    target_id=edge["target"],
+                )
         for registered in view["findings"]:
             finding = registered["finding"]
             if finding["kind"] != "cycle":
@@ -405,7 +475,12 @@ def audit_report(case, result):
                     errors.append(
                         f"{view_name}: definite witness exceeds definite members"
                     )
-                evidence_list(edge["evidence"], edge["source"], view_name)
+                evidence_list(
+                    edge["evidence"],
+                    edge["source"],
+                    view_name,
+                    target_id=edge["target"],
+                )
                 if finding["certainty"] == "definite" and any(
                     item["resolution_kind"] not in ("exact_base", "exact_module")
                     for item in edge["evidence"]
@@ -423,7 +498,12 @@ def audit_report(case, result):
                         f"{view_name}: component detail does not cover its graph edges"
                     )
                 for edge in finding["dependencies"]:
-                    evidence_list(edge["evidence"], edge["source"], view_name)
+                    evidence_list(
+                        edge["evidence"],
+                        edge["source"],
+                        view_name,
+                        target_id=edge["target"],
+                    )
         for boundary in (
             report["coverage"]["boundaries"] if view_name == "structural" else ()
         ):
@@ -443,6 +523,7 @@ def audit_report(case, result):
         "evidence_checked": checked,
         "missing_restricted_independent_edges": missing,
         "independent_edge_limit": "Saved AST oracle covers restricted exact relations, not full precision/recall.",
+        "package_graph_limit": "Package graph observations come from the reported dependencies; SCC traversal and evidence audits are supplementary, not an independent package edge oracle.",
     }
 
 
@@ -566,7 +647,11 @@ def replay_case(case, output):
         write_json(output / f"{case['name']}.report.json", result["report"])
         write_json(
             output / f"{case['name']}.graph.json",
-            {"graphs": result["graphs"], "self_edges": result["self_edges"]},
+            {
+                "graphs": result["graphs"],
+                "self_edges": result["self_edges"],
+                "graph_observation_sources": result["graph_observation_sources"],
+            },
         )
         if result.get("profile") is not None:
             write_json(output / f"{case['name']}.profile.json", result["profile"])
@@ -896,7 +981,7 @@ def profile_comparison(output):
             "interpretation": [
                 "The repeated whole-source snippet splitting path has been removed; one cached extraction now serves each import statement's aliases.",
                 "The archived paired context benchmark records the earlier optimization; its source hash identifies that earlier collector, not the current runtime.",
-                "Archived/current profiles have different functionality and instrumentation: the current run builds three contextual views and captures supplementary graph pairs.",
+                "Archived/current profiles have different functionality and instrumentation: the current run builds six module/package views and captures supplementary graph pairs.",
                 "Single profile timings are descriptive, include profiler overhead and changing machine load, and do not establish a controlled overall speedup.",
                 "Cumulative function timings overlap and must not be added together.",
             ],
@@ -913,6 +998,11 @@ def main():
     if args.worker:
         print(json.dumps(worker(json.load(sys.stdin)), sort_keys=True))
         return 0
+    if any(
+        args.output.resolve().is_relative_to(archived.resolve())
+        for archived in (ARCHIVE, PROJECT / "docs/validation/0.7")
+    ):
+        parser.error("output must not overwrite archived validation directories")
     before = archival_hashes()
     cases = []
     for path in sorted(ARCHIVE.glob("*.current.run.json")):
@@ -1014,6 +1104,7 @@ def main():
                 "Target code was parsed, never executed or installed.",
                 "Targets are the existing archived working directories; their recorded commit identities and source bytes were not independently reverified for this replay.",
                 "Supplementary product graphs are checked with independent SCC traversal but are not independent edge oracles.",
+                "Package graph observations come from the package report's dependency lists; module graphs are captured separately from the analysis snapshot.",
                 "Saved restricted exact-edge audits test a subset; no overall precision/recall or runtime safety claim.",
             ],
         },

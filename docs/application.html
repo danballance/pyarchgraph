@@ -146,7 +146,7 @@ footer { border-top: 1px solid var(--line); padding-top: 1.2rem; color: var(--mu
 <nav class="related" aria-label="Related documentation"><ul><li><a href="glossary.html">Terminology glossary ↗</a></li><li><a href="architecture.md">Architecture overview ↗</a></li></ul></nav></aside>
 <main id="main">
 <header class="hero"><p class="eyebrow">Package 02 / pyarchgraph.application</p><h1>Application</h1>
-<p class="lede">Organises one analysis, from the request through collection and checks to the final report.</p><div class="meta"><span>11 modules</span><span>27 classes</span><span>Walkthrough + class index</span></div></header>
+<p class="lede">Organises one analysis, from the request through collection and checks to the final report.</p><div class="meta"><span>11 modules</span><span>28 classes</span><span>Walkthrough + class index</span></div></header>
 <section class="content-section" id="role">
 <h2>Its role</h2>
 
@@ -172,7 +172,7 @@ import orders</code></pre></div>
 <li><h3>Validate and locate</h3><p><code>OptionValidator</code> checks the request and options. <code>ProjectAccess</code> then locates the roots and base directory. Invalid requests stop before source discovery or metadata access.</p></li>
 <li><h3>Collect a catalogue</h3><p><code>SourceCatalogBuilder</code> asks <code>SourceDiscovery</code> for sources and <code>ImportFactSource</code> for drafts. It applies shared report paths and source IDs, reconciles bindings across roots, and asks the domain canonicaliser to assign fact IDs. The result is one <code>SourceCatalog</code>.</p></li>
 <li><h3>Resolve and assess scope</h3><p><code>AnalyseProject</code> combines discovered and configured targets, calls the import resolver, and gathers coverage diagnostics. <code>LayoutDiagnosticService</code> uses project observations to flag questionable root choices without changing the selected roots.</p></li>
-<li><h3>Run registered views and checks</h3><p>The use case builds an <code>AnalysisSnapshot</code>. <code>StrategyEngine</code> normalises it, builds and validates each registered view, prepares its cycle analysis, and runs its selected checks. It attaches check IDs to findings and creates a <code>ViewReport</code> for each view.</p></li>
+<li><h3>Run registered views and checks</h3><p>The use case builds an <code>AnalysisSnapshot</code>. <code>StrategyEngine</code> normalises it, builds and validates each registered view, prepares its cycle analysis, and runs its selected checks. It attaches check IDs to findings, converts requested dependencies into readable <code>ReportDependency</code> values, and creates a <code>ViewReport</code> for each view.</p></li>
 <li><h3>Return the assembled report</h3><p>The domain coverage policy determines completeness. <code>AnalyseProject</code> combines sources, coverage, and all view reports in an <code>AnalysisReport</code>. The configured analyser can be reused; each run keeps its observations separate.</p></li>
 </ol>
 <div class="note"><p>The catalogue holds collected sources and facts. The snapshot supplies the analysis shared by views. The report holds the completed results. Each has a different job in the workflow.</p></div>
@@ -188,7 +188,9 @@ import orders</code></pre></div>
 <tr><td>Invalid request or analysis setup</td><td>A validation error, such as <code>AnalysisError</code> or <code>ValueError</code>, rather than a report.</td></tr>
 <tr><td>A registered view or check fails validation or raises</td><td><code>ExtensionError</code> identifies the failing extension; no report is returned.</td></tr>
 </tbody></table></div>
+<p><code>AnalysisOptions.package_max_depth</code> is an optional positive integer. The application validates it before project access, then configures immutable package strategies for that run. A supplied value overrides their constructor depth; omission keeps that configuration. Reusing the analyser does not retain a previous request's override.</p>
 <p><code>StrategyRegistry</code> names the available views and checks and selects checks per view. Custom strategies use the same workflow and result validation. An empty check selection leaves coverage requirements in place; cycle counts are still computed for the view.</p>
+<p>The default registry includes three source views and their three package counterparts. <code>ViewRegistration.report_dependencies</code> defaults to false and is enabled for the package views. Their <code>ViewReport.dependencies</code> contains every inter-node relationship, even outside cycles, with original source endpoints, locations, statements and resolution kinds. The field is <code>None</code> when not requested and an empty tuple when requested but the graph has no dependencies. It is independent of cycle detail and selected checks.</p>
 <p>The application returns Python values. The CLI adapter is responsible for JSON presentation and <a href="glossary.html#exit-code">exit codes</a>. Changing the gate selects which findings determine the CLI result; it does not reduce the coverage requirements.</p>
 </section>
 <section class="content-section" id="modules">
@@ -209,7 +211,7 @@ import orders</code></pre></div>
 </section>
 <section class="content-section" id="classes">
 <h2>Every class</h2>
-<p class="intro">All 27 classes in this package, including value types, contracts, and internal helpers. Names link to the source file; descriptions match the role summaries in the code.</p>
+<p class="intro">All 28 classes in this package, including value types, contracts, and internal helpers. Names link to the source file; descriptions match the role summaries in the code.</p>
 <nav class="module-links" aria-label="Class index by module"><a href="#module-requests"><code>requests.py</code></a>
 <a href="#module-ports-analysis"><code>ports/analysis.py</code></a>
 <a href="#module-ports-project"><code>ports/project.py</code></a>
@@ -262,7 +264,8 @@ import orders</code></pre></div>
 </dl></section>
 <section class="module" id="module-results"><h3><a href="../pyarchgraph/application/results.py"><code>results.py</code></a></h3><p>The report and its coverage, views, and registered findings.</p><dl class="class-list">
 <div class="class-entry" id="class-RegisteredFinding" data-class="pyarchgraph.application.results.RegisteredFinding"><dt><a href="../pyarchgraph/application/results.py"><code>RegisteredFinding</code></a></dt><dd>Connects a finding to the check that produced it and its severity.</dd></div>
-<div class="class-entry" id="class-ViewReport" data-class="pyarchgraph.application.results.ViewReport"><dt><a href="../pyarchgraph/application/results.py"><code>ViewReport</code></a></dt><dd>Presents the nodes, dependency counts and check findings for one graph view.</dd></div>
+<div class="class-entry" id="class-ReportDependency" data-class="pyarchgraph.application.results.ReportDependency"><dt><a href="../pyarchgraph/application/results.py"><code>ReportDependency</code></a></dt><dd>Describe a reported view dependency with readable original source evidence.</dd></div>
+<div class="class-entry" id="class-ViewReport" data-class="pyarchgraph.application.results.ViewReport"><dt><a href="../pyarchgraph/application/results.py"><code>ViewReport</code></a></dt><dd>Present nodes, counts, findings and optional full dependencies for one view.</dd></div>
 <div class="class-entry" id="class-Coverage" data-class="pyarchgraph.application.results.Coverage"><dt><a href="../pyarchgraph/application/results.py"><code>Coverage</code></a></dt><dd>Describes the analysed scope, exclusions, diagnostics and limits of an analysis.</dd></div>
 <div class="class-entry" id="class-AnalysisReport" data-class="pyarchgraph.application.results.AnalysisReport"><dt><a href="../pyarchgraph/application/results.py"><code>AnalysisReport</code></a></dt><dd>Presents analysis coverage and findings for every graph view.</dd></div>
 </dl></section>

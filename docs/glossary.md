@@ -54,7 +54,9 @@ file may have an import name, or may be analysed by path alone.
 
 A regular package has an `__init__.py` source file. A namespace groups import
 names without that initialiser. Finding `google.service` does not imply that
-PyArchGraph owns every sibling under `google`.
+PyArchGraph owns every sibling under `google`. Package views group source modules
+under namespaces without requiring initialisers; imports of namespace containers
+without a source target do not create graph edges.
 
 ### Binding
 
@@ -206,13 +208,15 @@ discovered and configured target declarations and checks their package layout.
 
 The shared source analysis supplied to every view: sources, facts, selected
 dependencies, external imports, and unresolved imports. `AnalysisSnapshot` is
-prepared before views filter or group that information.
+prepared before views filter or group that information. Its optional
+`resolved_dependencies` also preserves the resolver output before module-level
+dependency selection, allowing package views to retain original certainty.
 
 ### View
 
 A chosen perspective on the snapshot. A `GraphViewStrategy` produces a `ViewGraph`
-by selecting imports or grouping sources. Built-in views keep one node per source;
-extensions may group sources into larger units.
+by selecting imports or grouping sources. The default composition includes three
+source views and three package views with the same import filters.
 
 ### Structural view
 
@@ -230,6 +234,21 @@ unrecognised or ambiguous conditions remain included.
 The built-in view omitting recognised typing-only imports and imports inside
 functions or methods. `ModuleBodyView` is registered as `module-body`; class bodies
 outside functions remain included. It filters syntax rather than simulating startup execution.
+
+### Package view
+
+A view grouping sources by their immediate containing package, or the package an
+initializer defines. `PackageView` wraps a source-view strategy and is registered
+as `package-structural`, `package-non-typing` and `package-module-body`. Filtering
+precedes grouping; internal dependencies disappear and shared endpoints merge
+original evidence. Standalone and unbound sources remain individual nodes.
+
+### Package depth
+
+An optional cap on dotted package names. `AnalysisOptions.package_max_depth` and
+CLI `--package-max-depth` accept positive integers; `None` means no cap. Depth 1
+groups under the first component, so `acme.orders.internal` becomes `acme`.
+Depth 2 groups it under `acme.orders`. The uncapped view uses immediate packages.
 
 ### Projection
 
@@ -253,6 +272,7 @@ the original source dependencies, even when its endpoints represent groups of fi
 A cycle follows dependencies back to its starting node. A cyclic component is a
 group whose nodes can all reach one another, including a single node importing
 itself. A `CycleFinding` describes one such group, which may contain many cycles.
+Grouping sources can create a package cycle even when the source graph is acyclic.
 
 ### Witness
 
@@ -297,7 +317,8 @@ findings in the gate affect the CLI result when analysis is complete.
 
 The input to one analysis. `AnalysisRequest` carries source roots, a base directory,
 and `AnalysisOptions`. Options choose exclusions, a gate, detail level, ownership
-prefixes, and target declarations. The application validates them before collection.
+prefixes, target declarations, and an optional package depth cap. The application
+validates them before collection.
 
 ### Project observations
 
@@ -316,7 +337,9 @@ their results.
 
 A registration gives a strategy a name and, for checks, optional view applicability.
 `ViewRegistration` and `CheckRegistration` live in `StrategyRegistry`, which also
-records which checks are selected for each view. `StrategyEngine` runs them.
+records which checks are selected for each view. A view registration also chooses
+whether to report every dependency through `report_dependencies`, enabled by
+default for package views. `StrategyEngine` runs them.
 
 ### Coverage
 
@@ -335,8 +358,17 @@ partial results may still be returned.
 ### View report
 
 The completed result for one view: nodes, dependency and cycle counts, enabled
-checks, and registered findings. `ViewReport` is an application result, distinct
-from the intermediate `ViewGraph` used to run checks.
+checks, registered findings, and optionally all dependencies. `ViewReport` is an
+application result, distinct from the intermediate `ViewGraph` used to run checks.
+Its `dependencies` field is `None` if not requested, or a tuple that is empty when
+requested but no relationships exist; JSON uses `null` and `[]` respectively.
+
+### Reported dependency
+
+A relationship between view nodes with readable original source evidence.
+`ReportDependency` carries `source` and `target` node IDs and `EvidenceLocation`
+values, including paths, positions, statements, original source endpoints and
+resolution kinds. Package reports include every relationship, even without cycles.
 
 ### Analysis report
 
@@ -354,7 +386,8 @@ Available as `AnalysisReport.gate` and the `selected_view` convenience property.
 
 How much cycle evidence is included. `summary` supplies a witness; `component-edges`
 also lists every dependency inside the cyclic component. The `Details` type names
-these choices. Neither option enumerates every elementary cycle.
+these choices. Neither option enumerates every elementary cycle. View-level
+dependency reporting is independent of cycle detail.
 
 ### Analysis failure and extension failure
 

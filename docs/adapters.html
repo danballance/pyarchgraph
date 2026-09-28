@@ -169,7 +169,7 @@ import inventory</code></pre><pre><code><span class="comment"># demo/inventory.p
 import orders</code></pre></div>
 </figure>
 <ol class="steps">
-<li><h3>Turn CLI choices into a request</h3><p><code>CliApplication</code> reads roots, exclusions, gate, detail level, and an optional config path. <code>TomlOptionsReader</code> translates an explicitly selected TOML file and CLI choices into <code>AnalysisOptions</code>. The CLI calls the <code>ProjectAnalyzer</code> port.</p></li>
+<li><h3>Turn CLI choices into a request</h3><p><code>CliApplication</code> reads roots, exclusions, gate, detail level, optional package depth, and an optional config path. <code>TomlOptionsReader</code> translates an explicitly selected TOML file and CLI choices into <code>AnalysisOptions</code>. The CLI calls the <code>ProjectAnalyzer</code> port.</p></li>
 <li><h3>Discover the files</h3><p>When the application requests it, <code>FileSystemProjectAccess</code> locates roots and supplies packaging clues. <code>FileSystemSourceDiscovery</code> inventories sources, exclusions, bindings, and target declarations. It recognises ordinary package/module precedence within a root.</p></li>
 <li><h3>Read imports without running the project</h3><p><code>AstImportFactSource</code> coordinates <code>SourceReader</code>, <code>PythonAstParser</code>, and <code>ModuleImportExtractor</code>. The two statements become two <code>ImportFactDraft</code> values, with locations and context. The application later assigns final fact identities.</p></li>
 <li><h3>Supply the graph operations</h3><p>During view analysis, <code>NetworkXGraphAlgorithms</code> prepares graphs and returns <code>NetworkXGraphHandle</code> objects. These find groups whose nodes can all reach one another and a witness cycle when asked. Domain code decides what that cycle means and which evidence supports it.</p></li>
@@ -179,6 +179,9 @@ import orders</code></pre></div>
 </section>
 <section class="content-section" id="connections">
 <h2>How parts connect</h2>
+
+<p>Package analysis uses the same filesystem, parser and graph adapters. Select a package gate with <code>--gate package-structural</code>, <code>--gate package-non-typing</code> or <code>--gate package-module-body</code>. <code>--package-max-depth N</code> takes a positive integer and caps dotted package names; omitting it keeps immediate packages. The option is carried through <code>AnalysisOptions</code>; TOML remains focused on ownership and target boundaries.</p>
+<p><code>JsonReportRenderer</code> presents schema 0.8 using the same generic serialization. Each view gains <code>dependencies</code>: <code>null</code> when not requested, or an array of all requested relationships with readable source evidence. The three default package views always provide the array, which can be empty. These relationships are independent of <code>--details component-edges</code>, which controls evidence inside cycle findings.</p>
 
 <div class="table-wrap"><table><caption>Core contracts and concrete adapters</caption><thead><tr><th scope="col">Contract</th><th scope="col">Adapter relationship</th></tr></thead><tbody>
 <tr><td><code>ProjectAnalyzer</code></td><td>The CLI calls this application input port; <code>AnalyseProject</code> implements it.</td></tr>

@@ -78,6 +78,12 @@ class CliApplication:
             help="include a witness or all internal component dependencies",
         )
         parser.add_argument(
+            "--package-max-depth",
+            type=int,
+            metavar="N",
+            help="cap package grouping at N dotted name parts (default: immediate packages)",
+        )
+        parser.add_argument(
             "--config", type=Path, help="explicit TOML ownership/boundary configuration"
         )
         args = parser.parse_args(argv)
@@ -88,6 +94,7 @@ class CliApplication:
                 excludes=tuple(args.exclude),
                 gate=args.gate,
                 details=args.details,
+                package_max_depth=args.package_max_depth,
                 base_dir=base_dir,
             )
             report = self.analyzer.analyse(

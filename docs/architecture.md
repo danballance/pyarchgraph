@@ -39,7 +39,7 @@ pyarchgraph/
     ├── driving/cli/
     │   ├── application.py      # Arguments, invocation and exit-code policy
     │   ├── configuration.py    # TOML input translation
-    │   └── rendering.py        # JSON schema 0.7 presentation
+    │   └── rendering.py        # JSON schema 0.8 presentation
     └── driven/
         ├── filesystem/
         │   ├── discovery.py   # Source inventory and exclusions
@@ -76,8 +76,9 @@ preserved.
 
 Pure domain policies select source bindings, reconcile target declarations and
 resolve imports. The application adds scope diagnostics and prepares the immutable
-analysis snapshot. Domain strategies operate on normalized snapshots through
-domain-owned resolver, graph-algorithm and strategy protocols. Contextual
+analysis snapshot, preserving both selected module dependencies and optional
+`resolved_dependencies` from the resolver. Domain strategies operate on normalized
+snapshots through domain-owned resolver, graph-algorithm and strategy protocols. Contextual
 validation verifies view membership, original evidence and findings at extension
 boundaries. Built-ins explicitly inherit their protocols; external extensions
 may implement them structurally.
@@ -95,11 +96,48 @@ analysis returns 0, selected error findings return 1, and incomplete analysis or
 invocation/extension failures return 2. Source failures can return useful partial
 reports, while invalid invocation and extension failures produce no JSON report.
 
+## Package projection and dependency reports
+
+The six default views share discovery, parsing, resolution, graph algorithms and
+checks. `structural`, `non-typing` and `module-body` retain source nodes.
+`PackageView` wraps each source filter to provide `package-structural`,
+`package-non-typing` and `package-module-body`. Filtering precedes aggregation.
+
+Package membership comes from reliable source bindings: an ordinary module's
+containing package, or the initializer's own package. Namespace packages require
+no initializer. Membership is disjoint; parent nodes do not also contain child
+package sources. Standalone and unbound sources stay as individual nodes.
+`AnalysisOptions.package_max_depth` optionally caps dotted package names; depth
+1 means their first component. It is validated before project access and applied
+to immutable per-run registrations, leaving the reusable registry unchanged.
+
+Projection merges evidence for each node pair, removes dependencies internal to
+a node and retains isolated nodes. The normal module dependency policy remains
+unchanged. Package views can recover discarded exact-base evidence from
+`AnalysisSnapshot.resolved_dependencies` only when the same retained import fact
+has probable-child evidence projecting to the same target package. Both evidence
+collections are normalized and validated; snapshots without the optional resolver
+collection remain supported. This preserves certainty without inventing an edge.
+
+`ViewRegistration.report_dependencies` controls complete dependency reporting.
+It defaults to false and is true for the default package views. The engine uses
+the existing evidence interpreter to create `ReportDependency` values with
+view-node endpoints and readable original source locations. `ViewReport.dependencies`
+is `None` when not requested and a tuple, possibly empty, when requested. JSON
+schema 0.8 renders these as `null` or an array, independently of cycle detail.
+
+Package cycles concern groups, so an acyclic module graph can have a cyclic
+package graph. Namespace-container-only imports have no source target and do not
+create package edges. Coverage and gate policy are otherwise shared: the default
+gate remains `structural`, and incomplete coverage still takes precedence.
+
 ## Python API migration
 
-This restructuring changes Python import paths and invocation shape. It does not
-change JSON schema 0.7, analysis semantics, fact IDs or CLI behaviour. There are
-no compatibility wrappers or aggregate public re-export modules.
+The earlier restructuring changed Python import paths and invocation shape.
+There are no compatibility wrappers or aggregate public re-export modules.
+Package analysis preserves those contracts, adds an optional request setting and
+snapshot field, and extends reports to JSON schema 0.8. See the
+[schema migration note](release-0.8.0.md).
 
 ```python
 from pathlib import Path
@@ -128,9 +166,9 @@ graph types from `pyarchgraph.domain.graph`, and application failures from
 base_dir=...)` arguments into one `AnalysisRequest`. Replace `report.exit_code`
 with the CLI policy when process-status semantics are needed.
 
-Checksmith integration and its earlier schema 0.6 → 0.7 migration remain a
-separate task in that repository. No Checksmith changes or release publishing
-are part of this restructuring.
+Checksmith integration and its schema migration remain a separate task in that
+repository; consumers must now accept schema 0.8. No Checksmith changes or release
+publishing are part of package analysis.
 
 ## Enforcement and verification
 

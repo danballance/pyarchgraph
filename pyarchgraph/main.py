@@ -40,6 +40,7 @@ from pyarchgraph.domain.strategies import (
     CycleCheck,
     ModuleBodyView,
     NonTypingView,
+    PackageView,
     StructuralView,
     UnresolvedImportCheck,
 )
@@ -102,6 +103,21 @@ class ApplicationFactory:
             ViewRegistration("structural", StructuralView()),
             ViewRegistration("non-typing", NonTypingView()),
             ViewRegistration("module-body", ModuleBodyView()),
+            ViewRegistration(
+                "package-structural",
+                PackageView(StructuralView()),
+                report_dependencies=True,
+            ),
+            ViewRegistration(
+                "package-non-typing",
+                PackageView(NonTypingView()),
+                report_dependencies=True,
+            ),
+            ViewRegistration(
+                "package-module-body",
+                PackageView(ModuleBodyView()),
+                report_dependencies=True,
+            ),
         )
 
     @staticmethod

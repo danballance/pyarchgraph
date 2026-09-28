@@ -5,7 +5,7 @@ from pyarchgraph.application.requests import AnalysisOptions, AnalysisRequest
 from pyarchgraph.main import ApplicationFactory
 
 
-def test_json_contract_has_coverage_three_views_and_stable_source_references(
+def test_json_contract_has_coverage_six_views_and_stable_source_references(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
@@ -25,13 +25,20 @@ def test_json_contract_has_coverage_three_views_and_stable_source_references(
         "coverage",
         "views",
     }
-    assert document["schema_version"] == "0.7"
+    assert document["schema_version"] == "0.8"
     assert document["status"] == "complete" and document["gate"] == "structural"
-    assert set(document["views"]) == {"structural", "non-typing", "module-body"}
+    assert set(document["views"]) == {
+        "structural",
+        "non-typing",
+        "module-body",
+        "package-structural",
+        "package-non-typing",
+        "package-module-body",
+    }
     sources = {item["id"]: item for item in document["sources"]}
     assert set(sources) == {"source:a.py", "source:b.py"}
     assert all(item["analysis_status"] == "analyzed" for item in sources.values())
-    for view in document["views"].values():
+    for name, view in document["views"].items():
         assert set(view) == {
             "nodes",
             "enabled_check_ids",
@@ -39,7 +46,12 @@ def test_json_contract_has_coverage_three_views_and_stable_source_references(
             "cyclic_node_count",
             "cyclic_dependency_count",
             "findings",
+            "dependencies",
         }
+        if name.startswith("package-"):
+            assert len(view["dependencies"]) == view["dependency_count"]
+        else:
+            assert view["dependencies"] is None
         assert (
             view["dependency_count"]
             == view["cyclic_node_count"]

@@ -32,7 +32,7 @@ def test_complete_analysis_prints_only_json_and_generates_no_files(
     assert ApplicationFactory().create_cli().run([str(tmp_path)]) == expected
     output = capsys.readouterr()
     document = json.loads(output.out)
-    assert document["schema_version"] == "0.7"
+    assert document["schema_version"] == "0.8"
     assert bool(document["views"]["structural"]["findings"]) == bool(expected)
     assert output.err == ""
     assert output.out.endswith("\n")

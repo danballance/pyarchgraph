@@ -53,13 +53,18 @@ class ViewGraph:
 
 @dataclass(frozen=True, slots=True)
 class AnalysisSnapshot:
-    """Provide the shared source facts and resolution results used to build views."""
+    """Provide shared source facts and the dependencies selected for module views.
+
+    Optional full resolution evidence supports package certainty without changing
+    the selected dependencies consumed by existing graph strategies.
+    """
 
     sources: tuple[SourceModule, ...]
     facts: tuple[ImportFact, ...]
     dependencies: tuple[DependencyEdge, ...]
     external_imports: tuple[ExternalImport, ...] = ()
     unresolved_imports: tuple[UnresolvedImport, ...] = ()
+    resolved_dependencies: tuple[DependencyEdge, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,6 +9,7 @@ from pyarchgraph.application.ports.sources import ExcludedPath
 from pyarchgraph.domain.graph import ViewNode
 from pyarchgraph.domain.models import (
     Diagnostic,
+    EvidenceLocation,
     Finding,
     Severity,
     SourceModule,
@@ -26,8 +27,17 @@ class RegisteredFinding:
 
 
 @dataclass(frozen=True, slots=True)
+class ReportDependency:
+    """Describe a reported view dependency with readable original source evidence."""
+
+    source: str
+    target: str
+    evidence: tuple[EvidenceLocation, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ViewReport:
-    """Presents the nodes, dependency counts and check findings for one graph view."""
+    """Present nodes, counts, findings and optional full dependencies for one view."""
 
     nodes: tuple[ViewNode, ...]
     enabled_check_ids: tuple[str, ...]
@@ -35,6 +45,7 @@ class ViewReport:
     cyclic_dependency_count: int
     cyclic_node_count: int
     findings: tuple[RegisteredFinding, ...]
+    dependencies: tuple[ReportDependency, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +61,7 @@ class Coverage:
     limitations: tuple[str, ...] = (
         "Only explicit import statements are analyzed; dynamic imports are outside coverage.",
         "External dependencies and runtime initialization are not analyzed.",
+        "Package views group available sources; imports of namespace packages without a source target do not create package dependencies.",
     )
 
 
@@ -65,7 +77,7 @@ class AnalysisReport:
     sources: tuple[SourceModule, ...]
     coverage: Coverage
     views: Mapping[str, ViewReport]
-    schema_version: Literal["0.7"] = field(default="0.7", init=False)
+    schema_version: Literal["0.8"] = field(default="0.8", init=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "views", MappingProxyType(dict(self.views)))

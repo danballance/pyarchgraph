@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
+from dataclasses import dataclass
+from keyword import iskeyword
 from typing import Protocol
 
 from pyarchgraph.domain.graph import (
@@ -23,7 +26,13 @@ from pyarchgraph.domain.models import (
     ImportFinding,
     ResolutionKind,
     Severity,
+    SourceModule,
     UnresolvedReason,
+)
+
+
+DEFINITE_RESOLUTION_KINDS = frozenset(
+    {ResolutionKind.EXACT_MODULE, ResolutionKind.EXACT_BASE}
 )
 
 
@@ -102,6 +111,110 @@ class ModuleBodyView(GraphViewStrategy):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class PackageView(GraphViewStrategy):
+    """Group a source view by immediate package, optionally rolling up ancestors.
+
+    Unbound sources and standalone modules remain individual source nodes.
+    Namespace descendants group by their import names without synthetic sources.
+    """
+
+    source_view: GraphViewStrategy
+    max_depth: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.max_depth is not None and (
+            type(self.max_depth) is not int or self.max_depth < 1
+        ):
+            raise ValueError("package maximum depth must be a positive integer")
+
+    def transform(self, snapshot: AnalysisSnapshot) -> ViewGraph:
+        source_graph = self.source_view.transform(snapshot)
+        projected = {member for node in source_graph.nodes for member in node.members}
+        owner = {}
+        labels = {}
+        node_packages: dict[str, str | None] = {}
+        groups: dict[str, list[str]] = defaultdict(list)
+        for source in snapshot.sources:
+            if source.id not in projected:
+                continue
+            package = self._package(source)
+            node_id = f"package:{package}" if package else source.id
+            if node_id in node_packages and node_packages[node_id] != package:
+                raise ValueError(
+                    f"package node ID {node_id!r} conflicts with a singleton source ID"
+                )
+            node_packages[node_id] = package
+            labels[node_id] = package or source.import_name or source.path
+            groups[node_id].append(source.id)
+            owner[source.id] = node_id
+
+        support: dict[tuple[str, str], set[ViewEvidence]] = defaultdict(set)
+        probable: set[tuple[str, str, str]] = set()
+        for edge in source_graph.dependencies:
+            for item in edge.evidence:
+                pair = owner[item.source], owner[item.target]
+                if pair[0] == pair[1]:
+                    continue
+                support[pair].add(item)
+                if item.resolution_kind is ResolutionKind.PROBABLE_SUBMODULE:
+                    probable.add((item.source, item.fact_id, pair[1]))
+
+        # The module policy drops a from-import's exact base in favour of its
+        # probable child. Restore that evidence only if both describe the same
+        # projected destination; package projection must not add parent edges.
+        retained = frozenset(source_graph.retained_fact_ids)
+        for edge in snapshot.resolved_dependencies or ():
+            target = owner.get(edge.target)
+            for item in edge.evidence:
+                if (
+                    item.resolution_kind is ResolutionKind.EXACT_BASE
+                    and item.fact_id in retained
+                    and (edge.source, item.fact_id, target) in probable
+                ):
+                    support[owner[edge.source], target].add(
+                        ViewEvidence(
+                            edge.source,
+                            edge.target,
+                            item.fact_id,
+                            item.resolution_kind,
+                        )
+                    )
+        return ViewGraph(
+            nodes=tuple(
+                ViewNode(node_id, labels[node_id], tuple(sorted(members)))
+                for node_id, members in sorted(groups.items())
+            ),
+            dependencies=tuple(
+                ViewEdge(
+                    *pair,
+                    tuple(
+                        sorted(
+                            evidence,
+                            key=lambda item: (
+                                item.source,
+                                item.target,
+                                item.fact_id,
+                                item.resolution_kind.value,
+                            ),
+                        )
+                    ),
+                )
+                for pair, evidence in sorted(support.items())
+            ),
+            retained_fact_ids=tuple(sorted(retained)),
+        )
+
+    def _package(self, source: SourceModule) -> str | None:
+        if source.binding_status != "bound" or not source.import_name:
+            return None
+        parts = source.import_name.split(".")
+        if not all(part.isidentifier() and not iskeyword(part) for part in parts):
+            return None
+        package_parts = parts if source.is_package else parts[:-1]
+        return ".".join(package_parts[: self.max_depth]) or None
+
+
 class EvidenceInterpreter:
     """Produce readable source evidence and remove repeated locations per dependency."""
 
@@ -134,6 +247,29 @@ class EvidenceInterpreter:
             unique.setdefault(self._location_key(item), item)
         return tuple(unique.values())
 
+    def dependency(
+        self,
+        edge: ViewEdge,
+        facts: dict[str, ImportFact],
+        *,
+        definite_only: bool = False,
+    ) -> FindingDependency:
+        """Explain a projected dependency using its original source locations."""
+        return FindingDependency(
+            edge.source,
+            edge.target,
+            self.unique_locations(
+                tuple(
+                    self.location(
+                        facts[item.fact_id], item.resolution_kind, target=item.target
+                    )
+                    for item in edge.evidence
+                    if not definite_only
+                    or item.resolution_kind in DEFINITE_RESOLUTION_KINDS
+                )
+            ),
+        )
+
     def _location_with_fact_key(self, item: EvidenceLocation) -> tuple:
         return self._location_key(item) + (item.fact_id or "",)
 
@@ -159,7 +295,7 @@ class EvidenceInterpreter:
 class CycleAnalyzer:
     """Interpret cycle certainty and evidence, choosing one stable witness per group."""
 
-    DEFINITE_KINDS = frozenset({ResolutionKind.EXACT_MODULE, ResolutionKind.EXACT_BASE})
+    DEFINITE_KINDS = DEFINITE_RESOLUTION_KINDS
 
     def __init__(self, algorithms: GraphAlgorithms) -> None:
         self._algorithms = algorithms
@@ -215,7 +351,7 @@ class CycleAnalyzer:
                     members=members,
                     definite_members=definite_members,
                     witness=tuple(
-                        self._dependency(
+                        self._evidence.dependency(
                             by_pair[pair], facts_by_id, definite_only=definite_only
                         )
                         for pair in witness
@@ -223,7 +359,7 @@ class CycleAnalyzer:
                     dependency_count=len(component_pairs[index]),
                     dependencies=(
                         tuple(
-                            self._dependency(
+                            self._evidence.dependency(
                                 by_pair[pair], facts_by_id, definite_only=False
                             )
                             for pair in component_pairs[index]
@@ -234,23 +370,6 @@ class CycleAnalyzer:
                 )
             )
         return tuple(findings)
-
-    def _dependency(
-        self, edge: ViewEdge, facts: dict[str, ImportFact], *, definite_only: bool
-    ) -> FindingDependency:
-        return FindingDependency(
-            edge.source,
-            edge.target,
-            self._evidence.unique_locations(
-                tuple(
-                    self._evidence.location(
-                        facts[item.fact_id], item.resolution_kind, target=item.target
-                    )
-                    for item in edge.evidence
-                    if not definite_only or item.resolution_kind in self.DEFINITE_KINDS
-                )
-            ),
-        )
 
     @staticmethod
     def _cyclic_components(

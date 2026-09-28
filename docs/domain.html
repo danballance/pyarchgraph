@@ -169,7 +169,7 @@ footer { border-top: 1px solid var(--line); padding-top: 1.2rem; color: var(--mu
 <nav class="related" aria-label="Related documentation"><ul><li><a href="glossary.html">Terminology glossary ↗</a></li><li><a href="architecture.md">Architecture overview ↗</a></li></ul></nav></aside>
 <main id="main">
 <header class="hero"><p class="eyebrow">Package 01 / pyarchgraph.domain</p><h1>Domain</h1>
-<p class="lede">Understands imports and decides what the collected information means.</p><div class="meta"><span>10 modules</span><span>54 classes</span><span>Walkthrough + class index</span></div></header>
+<p class="lede">Understands imports and decides what the collected information means.</p><div class="meta"><span>10 modules</span><span>55 classes</span><span>Walkthrough + class index</span></div></header>
 <section class="content-section" id="role">
 <h2>Its role</h2>
 
@@ -197,7 +197,7 @@ footer { border-top: 1px solid var(--line); padding-top: 1.2rem; color: var(--mu
 </div>
 <figcaption>From sources to report. Scroll across the diagram on smaller screens. <a href="domain-flow.mmd">View editable Mermaid source</a>.</figcaption>
 </figure>
-<p>The shared snapshot carries sources, import facts, selected dependencies, and external or unresolved imports. Each registered view then receives its own cycle analysis and selected checks. Cycle counts are computed even when no checks are selected.</p>
+<p>The shared snapshot carries sources, import facts, selected dependencies, original resolver dependencies, and external or unresolved imports. Each registered view then receives its own cycle analysis and selected checks. Cycle counts are computed even when no checks are selected.</p>
 <div class="note"><p><strong>Coverage has its own rules.</strong> Collection and resolution diagnostics, layout observations, and referenced target boundaries determine completeness. The application calculates this after successful view evaluation and combines it with all view reports. A complete report can contain error findings.</p></div>
 <p>Recoverable source failures continue as diagnostics alongside the available results. A registered view or check that raises or returns invalid output produces <code>ExtensionError</code> and stops the analysis without a report.</p>
 <details class="flow-key">
@@ -230,7 +230,7 @@ import orders</code></pre></div>
 <ol class="steps">
 <li><h3>Give the observations stable identities</h3><p>Discovery supplies two <code>SourceModule</code> values. Their IDs become <code>source:demo/orders.py</code> and <code>source:demo/inventory.py</code>. Once the application has aligned paths, <code>FactCanonicalizer</code> turns the two drafts into identified <code>ImportFact</code> values.</p></li>
 <li><h3>Match each import to its target</h3><p><code>StaticImportResolver</code> uses known bindings to connect <code>orders</code> to <code>inventory</code>, and back again. Each <code>DependencyEdge</code> keeps the fact ID and resolution kind explaining why that relationship exists.</p></li>
-<li><h3>Choose the relationships for analysis</h3><p><code>ArchitectureDependencyPolicy</code> removes redundant package-base evidence where a fact already identifies a probable child. These plain imports keep both edges. The application places them, the sources, and the facts in one <code>AnalysisSnapshot</code>.</p></li>
+<li><h3>Choose the relationships for analysis</h3><p><code>ArchitectureDependencyPolicy</code> removes redundant package-base evidence where a fact already identifies a probable child. These plain imports keep both edges. The application places selected dependencies, the original resolver output, sources, and facts in one <code>AnalysisSnapshot</code>.</p></li>
 <li><h3>Build a view and explain its cycle</h3><p>A view turns the snapshot into a <code>ViewGraph</code>. <code>CycleAnalyzer</code> asks the graph contract for cyclic groups, interprets the supporting facts, and selects a witness: <code>inventory → orders → inventory</code>.</p></li>
 <li><h3>Turn the observation into a finding</h3><p><code>CycleCheck</code> returns a <code>CheckResult</code> containing an error-level <code>CycleFinding</code>. The application adds the check ID and includes it in the view report.</p></li>
 </ol>
@@ -239,13 +239,16 @@ import orders</code></pre></div>
 <section class="content-section" id="views">
 <h2>Views and findings</h2>
 
-<p>Every built-in view retains one node per source. They differ in which import facts support the relationships.</p>
-<div class="table-wrap"><table><caption>Three perspectives on the same sources</caption><thead><tr><th scope="col">View</th><th scope="col">Imports retained</th></tr></thead><tbody>
-<tr><td><code>structural</code></td><td>All explicit import statements.</td></tr>
-<tr><td><code>non-typing</code></td><td>Everything except recognised <code>TYPE_CHECKING</code> bodies.</td></tr>
-<tr><td><code>module-body</code></td><td>Also omits imports inside functions or methods; class bodies outside functions remain.</td></tr>
+<p>The default composition includes source and package views for each of three import filters. Source views keep one node per file; package views group those sources after filtering.</p>
+<div class="table-wrap"><table><caption>Six perspectives on the same sources</caption><thead><tr><th scope="col">Source view</th><th scope="col">Package view</th><th scope="col">Imports retained</th></tr></thead><tbody>
+<tr><td><code>structural</code></td><td><code>package-structural</code></td><td>All explicit import statements.</td></tr>
+<tr><td><code>non-typing</code></td><td><code>package-non-typing</code></td><td>Everything except recognised <code>TYPE_CHECKING</code> bodies.</td></tr>
+<tr><td><code>module-body</code></td><td><code>package-module-body</code></td><td>Also omits imports inside functions or methods; class bodies outside functions remain.</td></tr>
 </tbody></table></div>
-<p>The example has the same cycle in all three views. An extension can also group files into larger nodes. <code>GraphValidator</code> checks that the projected relationships still have original evidence and that source memberships do not overlap.</p>
+<p><code>PackageView</code> wraps a source strategy. A module belongs to its immediate containing package; an initializer belongs to its own package. Nodes use <code>package:&lt;dotted-name&gt;</code> IDs with disjoint memberships. Parent packages do not duplicate child-package sources. Standalone modules and sources without reliable bindings remain individual source nodes, so the walkthrough's two standalone files retain their cycle in all six views.</p>
+<p>An optional <code>max_depth</code> caps the package's dotted name: depth 1 groups <code>acme.orders</code> and <code>acme.inventory</code> under <code>acme</code>; depth 2 keeps them separate. Projection drops dependencies inside a node, merges original evidence between shared endpoints and retains isolated nodes. A package cycle may exist even if no individual source modules form a cycle.</p>
+<p>Namespace package sources group without <code>__init__.py</code>. An import of only the namespace container has no source target, so it does not create a graph edge. <code>GraphValidator</code> verifies original evidence and disjoint source memberships for package views and extensions alike.</p>
+<p>The snapshot's optional <code>resolved_dependencies</code> preserves resolver evidence removed by module-level dependency selection. Package projection restores exact-base evidence only for the same retained import fact whose probable-child evidence maps to the same target package. This retains certainty without adding an unrelated package relationship. Older snapshots without the extra collection remain supported.</p>
 <p>A <a href="glossary.html#cycle-and-cyclic-component">cycle finding</a> describes one cyclic group and one <a href="glossary.html#witness">witness</a>. A group can contain several cycles. “Definite” means it contains a cycle supported by exact resolution; it does not predict a crash when Python executes the project.</p>
 <p><code>UnresolvedImportCheck</code> reports unresolved imports retained by the view, except unmodelled namespace bases. Extensions may return a <code>RuleFinding</code> for other observations. <code>CheckResultValidator</code> checks their shape, source references, and evidence.</p>
 <div class="note"><p><strong>Coverage is a separate decision.</strong> <code>CoveragePolicy</code> requires no error diagnostics and acknowledgement of every encountered boundary. A complete analysis can still contain error findings, as this two-file example does.</p></div>
@@ -267,7 +270,7 @@ import orders</code></pre></div>
 </section>
 <section class="content-section" id="classes">
 <h2>Every class</h2>
-<p class="intro">All 54 classes in this package, including value types, contracts, and internal helpers. Names link to the source file; descriptions match the role summaries in the code.</p>
+<p class="intro">All 55 classes in this package, including value types, contracts, and internal helpers. Names link to the source file; descriptions match the role summaries in the code.</p>
 <nav class="module-links" aria-label="Class index by module"><a href="#module-models"><code>models.py</code></a>
 <a href="#module-bindings"><code>bindings.py</code></a>
 <a href="#module-canonicalization"><code>canonicalization.py</code></a>
@@ -324,7 +327,7 @@ import orders</code></pre></div>
 <div class="class-entry" id="class-ViewEvidence" data-class="pyarchgraph.domain.graph.ViewEvidence"><dt><a href="../pyarchgraph/domain/graph.py"><code>ViewEvidence</code></a></dt><dd>Keep original source endpoints and their supporting fact visible in a view.</dd></div>
 <div class="class-entry" id="class-ViewEdge" data-class="pyarchgraph.domain.graph.ViewEdge"><dt><a href="../pyarchgraph/domain/graph.py"><code>ViewEdge</code></a></dt><dd>Connect two view nodes using evidence from original source dependencies.</dd></div>
 <div class="class-entry" id="class-ViewGraph" data-class="pyarchgraph.domain.graph.ViewGraph"><dt><a href="../pyarchgraph/domain/graph.py"><code>ViewGraph</code></a></dt><dd>Hold the nodes, dependencies and import fact IDs retained by one view.</dd></div>
-<div class="class-entry" id="class-AnalysisSnapshot" data-class="pyarchgraph.domain.graph.AnalysisSnapshot"><dt><a href="../pyarchgraph/domain/graph.py"><code>AnalysisSnapshot</code></a></dt><dd>Provide the shared source facts and resolution results used to build views.</dd></div>
+<div class="class-entry" id="class-AnalysisSnapshot" data-class="pyarchgraph.domain.graph.AnalysisSnapshot"><dt><a href="../pyarchgraph/domain/graph.py"><code>AnalysisSnapshot</code></a></dt><dd>Provide shared source facts and the dependencies selected for module views.</dd></div>
 <div class="class-entry" id="class-CheckContext" data-class="pyarchgraph.domain.graph.CheckContext"><dt><a href="../pyarchgraph/domain/graph.py"><code>CheckContext</code></a></dt><dd>Provide a check with one view&#x27;s graph, retained imports and cycle analysis.</dd></div>
 </dl></section>
 <section class="module" id="module-strategies"><h3><a href="../pyarchgraph/domain/strategies.py"><code>strategies.py</code></a></h3><p>Built-in views, cycle interpretation, and checks.</p><dl class="class-list">
@@ -334,6 +337,7 @@ import orders</code></pre></div>
 <div class="class-entry" id="class-StructuralView" data-class="pyarchgraph.domain.strategies.StructuralView"><dt><a href="../pyarchgraph/domain/strategies.py"><code>StructuralView</code></a></dt><dd>Include all explicit imports in a source graph view.</dd></div>
 <div class="class-entry" id="class-NonTypingView" data-class="pyarchgraph.domain.strategies.NonTypingView"><dt><a href="../pyarchgraph/domain/strategies.py"><code>NonTypingView</code></a></dt><dd>Build a source graph view without recognised typing-only imports.</dd></div>
 <div class="class-entry" id="class-ModuleBodyView" data-class="pyarchgraph.domain.strategies.ModuleBodyView"><dt><a href="../pyarchgraph/domain/strategies.py"><code>ModuleBodyView</code></a></dt><dd>Exclude recognised typing-only imports and those inside functions or methods.</dd></div>
+<div class="class-entry" id="class-PackageView" data-class="pyarchgraph.domain.strategies.PackageView"><dt><a href="../pyarchgraph/domain/strategies.py"><code>PackageView</code></a></dt><dd>Group a source view by immediate package, optionally rolling up ancestors.</dd></div>
 <div class="class-entry" id="class-EvidenceInterpreter" data-class="pyarchgraph.domain.strategies.EvidenceInterpreter"><dt><a href="../pyarchgraph/domain/strategies.py"><code>EvidenceInterpreter</code></a></dt><dd>Produce readable source evidence and remove repeated locations per dependency.</dd></div>
 <div class="class-entry" id="class-CycleAnalyzer" data-class="pyarchgraph.domain.strategies.CycleAnalyzer"><dt><a href="../pyarchgraph/domain/strategies.py"><code>CycleAnalyzer</code></a></dt><dd>Interpret cycle certainty and evidence, choosing one stable witness per group.</dd></div>
 <div class="class-entry" id="class-CycleCheck" data-class="pyarchgraph.domain.strategies.CycleCheck"><dt><a href="../pyarchgraph/domain/strategies.py"><code>CycleCheck</code></a></dt><dd>Report every analysed cycle group as an error finding.</dd></div>

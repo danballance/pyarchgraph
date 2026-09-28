@@ -90,7 +90,7 @@ def test_equivalent_import_spellings_are_normalized(tmp_path: Path) -> None:
     _write(tmp_path, "pkg/a.py", "from . import b\n")
     relative = json.loads(_run(tmp_path).stdout)
     assert absolute == relative
-    assert absolute["schema_version"] == "0.7"
+    assert absolute["schema_version"] == "0.8"
     assert len(absolute["sources"]) == 3
     assert absolute["views"]["structural"]["dependency_count"] == 1
     assert absolute["views"]["structural"]["findings"] == []

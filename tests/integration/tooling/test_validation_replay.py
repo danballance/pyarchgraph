@@ -370,3 +370,137 @@ def test_profile_comparison_identifies_source_cache_constructor(tmp_path, monkey
     monkeypatch.setattr(replay, "write_json", lambda path, value: saved.update(value))
     replay.profile_comparison(tmp_path)
     assert saved["current"]["source_cache_cumulative_seconds"] == 0.5
+
+
+@pytest.fixture
+def package_worker_result(tmp_path):
+    files = {
+        "app/one/a.py": (
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n    import app.two.x\n"
+            "def load():\n    import app.three.y\n"
+            "import app.four.z\n"
+        ),
+        "app/one/leaf.py": "",
+        "app/two/b.py": "import app.one.leaf\n",
+        "app/two/x.py": "",
+        "app/three/c.py": "import app.one.leaf\n",
+        "app/three/y.py": "",
+        "app/four/d.py": "import app.one.leaf\n",
+        "app/four/z.py": "",
+    }
+    for name, text in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    case = {
+        "name": "package-roundtrip",
+        "original_case": "package-roundtrip",
+        "cwd": str(tmp_path),
+        "roots": ["."],
+        "excludes": [],
+        "supplement": True,
+    }
+    completed = replay.subprocess.run(
+        [replay.sys.executable, "-I", replay.__file__, "--worker"],
+        input=json.dumps(case),
+        text=True,
+        capture_output=True,
+        check=True,
+        cwd=replay.PROJECT,
+    )
+    assert completed.stderr == ""
+    return case, json.loads(completed.stdout)
+
+
+def test_worker_roundtrip_audits_six_views_and_package_contexts(package_worker_result):
+    case, result = package_worker_result
+    assert result["report"]["schema_version"] == "0.8"
+    assert result["exit_code"] == 0
+    assert set(result["graphs"]) == set(result["report"]["views"])
+    assert len(result["graphs"]) == 6
+    assert all(
+        not replay.components(result["graphs"][name])
+        for name in ("structural", "non-typing", "module-body")
+    )
+    for name, expected in (
+        ("package-structural", 4),
+        ("package-non-typing", 3),
+        ("package-module-body", 2),
+    ):
+        assert result["report"]["views"][name]["cyclic_node_count"] == expected
+        assert result["graph_observation_sources"][name] == "reported_dependencies"
+    assert result["graph_observation_sources"]["structural"] == "analysis_snapshot"
+    audit = replay.audit_report(case, result)
+    assert audit["errors"] == []
+    assert audit["evidence_checked"] > 0
+    assert "not an independent package edge oracle" in audit["package_graph_limit"]
+
+
+@pytest.mark.parametrize(
+    "corruption,expected_error",
+    [
+        ("source", "evidence source does not belong to dependency node"),
+        ("target", "evidence target does not belong to dependency node"),
+        ("missing_edge", "full dependencies do not cover its graph edges"),
+        ("missing_dependencies", "full package dependencies are missing"),
+        ("typing_context", "typing-only evidence survived filter"),
+        ("deferred_context", "deferred evidence survived filter"),
+    ],
+)
+def test_package_report_audit_rejects_corrupted_relationships(
+    package_worker_result, corruption, expected_error
+):
+    case, result = package_worker_result
+    view = result["report"]["views"]["package-module-body"]
+    edge = view["dependencies"][0]
+    evidence = edge["evidence"][0]
+    if corruption == "source":
+        evidence["source"] = evidence["target"]
+    elif corruption == "target":
+        evidence["target"] = evidence["source"]
+    elif corruption == "missing_edge":
+        view["dependencies"].pop()
+    elif corruption == "missing_dependencies":
+        view["dependencies"] = None
+    elif corruption == "typing_context":
+        evidence["context"]["typing_only"] = True
+    elif corruption == "deferred_context":
+        evidence["context"]["in_function"] = True
+    assert any(
+        expected_error in error for error in replay.audit_report(case, result)["errors"]
+    )
+
+
+def test_replay_case_roundtrip_saves_package_graph_provenance(
+    package_worker_result, tmp_path
+):
+    case, _ = package_worker_result
+    case = dict(case, package_max_depth=1)
+    output = tmp_path / "fresh-replay"
+    output.mkdir()
+    record = replay.replay_case(case, output)
+    assert record["audit"]["errors"] == []
+    report = json.loads((output / "package-roundtrip.report.json").read_text())
+    graph = json.loads((output / "package-roundtrip.graph.json").read_text())
+    assert report["schema_version"] == "0.8"
+    assert report["views"]["package-structural"]["dependencies"] == []
+    assert len(report["views"]["package-structural"]["nodes"]) == 1
+    assert (
+        graph["graph_observation_sources"]["package-structural"]
+        == "reported_dependencies"
+    )
+    assert graph["graph_observation_sources"]["structural"] == "analysis_snapshot"
+
+
+@pytest.mark.parametrize("directory", ["0.7", "2026-09-26"])
+def test_replay_refuses_to_overwrite_archived_validation(directory, monkeypatch):
+    destination = replay.PROJECT / "docs/validation" / directory
+    monkeypatch.setattr(replay.sys, "argv", ["replay", "--output", str(destination)])
+    with pytest.raises(SystemExit) as error:
+        replay.main()
+    assert error.value.code == 2
+
+
+def test_replay_defaults_to_fresh_schema_output():
+    assert replay.OUTPUT == replay.PROJECT / "docs/validation/0.8"

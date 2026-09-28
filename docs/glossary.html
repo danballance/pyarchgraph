@@ -154,7 +154,7 @@ footer { border-top: 1px solid var(--line); padding-top: 1.2rem; color: var(--mu
 <header class="hero"><p class="eyebrow">PyArchGraph / shared terminology</p><h1>Glossary</h1>
 <p class="lede">A shared vocabulary for understanding PyArchGraph.</p>
 <p>The terms used in the code and package guides, with their corresponding code names. Prose uses <strong>catalogue</strong>; Python identifiers retain <strong>Catalog</strong>.</p>
-<div class="meta"><span>65 terms</span><span>5 groups</span><span>Plain-language definitions</span></div></header>
+<div class="meta"><span>68 terms</span><span>5 groups</span><span>Plain-language definitions</span></div></header>
 <!-- Definitions mirror glossary.md; update both views together. -->
 <section class="content-section" id="source-scope-and-identity">
 <h2>Source scope and identity</h2>
@@ -195,7 +195,9 @@ file may have an import name, or may be analysed by path alone.</p>
 <h3><a href="#package-and-namespace">Package and namespace</a></h3>
 <p>A regular package has an <code>__init__.py</code> source file. A namespace groups import
 names without that initialiser. Finding <code>google.service</code> does not imply that
-PyArchGraph owns every sibling under <code>google</code>.</p>
+PyArchGraph owns every sibling under <code>google</code>. Package views group source modules
+under namespaces without requiring initialisers; imports of namespace containers
+without a source target do not create graph edges.</p>
 </article>
 <article class="glossary-term" id="binding">
 <h3><a href="#binding">Binding</a></h3>
@@ -349,13 +351,15 @@ discovered and configured target declarations and checks their package layout.</
 <h3><a href="#analysis-snapshot">Analysis snapshot</a></h3>
 <p>The shared source analysis supplied to every view: sources, facts, selected
 dependencies, external imports, and unresolved imports. <code>AnalysisSnapshot</code> is
-prepared before views filter or group that information.</p>
+prepared before views filter or group that information. Its optional
+<code>resolved_dependencies</code> also preserves the resolver output before module-level
+dependency selection, allowing package views to retain original certainty.</p>
 </article>
 <article class="glossary-term" id="view">
 <h3><a href="#view">View</a></h3>
 <p>A chosen perspective on the snapshot. A <code>GraphViewStrategy</code> produces a <code>ViewGraph</code>
-by selecting imports or grouping sources. Built-in views keep one node per source;
-extensions may group sources into larger units.</p>
+by selecting imports or grouping sources. The default composition includes three
+source views and three package views with the same import filters.</p>
 </article>
 <article class="glossary-term" id="structural-view">
 <h3><a href="#structural-view">Structural view</a></h3>
@@ -373,6 +377,21 @@ unrecognised or ambiguous conditions remain included.</p>
 <p>The built-in view omitting recognised typing-only imports and imports inside
 functions or methods. <code>ModuleBodyView</code> is registered as <code>module-body</code>; class bodies
 outside functions remain included. It filters syntax rather than simulating startup execution.</p>
+</article>
+<article class="glossary-term" id="package-view">
+<h3><a href="#package-view">Package view</a></h3>
+<p>A view grouping sources by their immediate containing package, or the package an
+initializer defines. <code>PackageView</code> wraps a source-view strategy and is registered
+as <code>package-structural</code>, <code>package-non-typing</code> and <code>package-module-body</code>. Filtering
+precedes grouping; internal dependencies disappear and shared endpoints merge
+original evidence. Standalone and unbound sources remain individual nodes.</p>
+</article>
+<article class="glossary-term" id="package-depth">
+<h3><a href="#package-depth">Package depth</a></h3>
+<p>An optional cap on dotted package names. <code>AnalysisOptions.package_max_depth</code> and
+CLI <code>--package-max-depth</code> accept positive integers; <code>None</code> means no cap. Depth 1
+groups under the first component, so <code>acme.orders.internal</code> becomes <code>acme</code>.
+Depth 2 groups it under <code>acme.orders</code>. The uncapped view uses immediate packages.</p>
 </article>
 <article class="glossary-term" id="projection">
 <h3><a href="#projection">Projection</a></h3>
@@ -395,7 +414,8 @@ the original source dependencies, even when its endpoints represent groups of fi
 <h3><a href="#cycle-and-cyclic-component">Cycle and cyclic component</a></h3>
 <p>A cycle follows dependencies back to its starting node. A cyclic component is a
 group whose nodes can all reach one another, including a single node importing
-itself. A <code>CycleFinding</code> describes one such group, which may contain many cycles.</p>
+itself. A <code>CycleFinding</code> describes one such group, which may contain many cycles.
+Grouping sources can create a package cycle even when the source graph is acyclic.</p>
 </article>
 <article class="glossary-term" id="witness">
 <h3><a href="#witness">Witness</a></h3>
@@ -441,7 +461,8 @@ findings in the gate affect the CLI result when analysis is complete.</p>
 <h3><a href="#analysis-request-and-options">Analysis request and options</a></h3>
 <p>The input to one analysis. <code>AnalysisRequest</code> carries source roots, a base directory,
 and <code>AnalysisOptions</code>. Options choose exclusions, a gate, detail level, ownership
-prefixes, and target declarations. The application validates them before collection.</p>
+prefixes, target declarations, and an optional package depth cap. The application
+validates them before collection.</p>
 </article>
 <article class="glossary-term" id="project-observations">
 <h3><a href="#project-observations">Project observations</a></h3>
@@ -460,7 +481,9 @@ their results.</p>
 <h3><a href="#registration-and-registry">Registration and registry</a></h3>
 <p>A registration gives a strategy a name and, for checks, optional view applicability.
 <code>ViewRegistration</code> and <code>CheckRegistration</code> live in <code>StrategyRegistry</code>, which also
-records which checks are selected for each view. <code>StrategyEngine</code> runs them.</p>
+records which checks are selected for each view. A view registration also chooses
+whether to report every dependency through <code>report_dependencies</code>, enabled by
+default for package views. <code>StrategyEngine</code> runs them.</p>
 </article>
 <article class="glossary-term" id="coverage">
 <h3><a href="#coverage">Coverage</a></h3>
@@ -479,8 +502,17 @@ partial results may still be returned.</p>
 <article class="glossary-term" id="view-report">
 <h3><a href="#view-report">View report</a></h3>
 <p>The completed result for one view: nodes, dependency and cycle counts, enabled
-checks, and registered findings. <code>ViewReport</code> is an application result, distinct
-from the intermediate <code>ViewGraph</code> used to run checks.</p>
+checks, registered findings, and optionally all dependencies. <code>ViewReport</code> is an
+application result, distinct from the intermediate <code>ViewGraph</code> used to run checks.
+Its <code>dependencies</code> field is <code>None</code> if not requested, or a tuple that is empty when
+requested but no relationships exist; JSON uses <code>null</code> and <code>[]</code> respectively.</p>
+</article>
+<article class="glossary-term" id="reported-dependency">
+<h3><a href="#reported-dependency">Reported dependency</a></h3>
+<p>A relationship between view nodes with readable original source evidence.
+<code>ReportDependency</code> carries <code>source</code> and <code>target</code> node IDs and <code>EvidenceLocation</code>
+values, including paths, positions, statements, original source endpoints and
+resolution kinds. Package reports include every relationship, even without cycles.</p>
 </article>
 <article class="glossary-term" id="analysis-report">
 <h3><a href="#analysis-report">Analysis report</a></h3>
@@ -498,7 +530,8 @@ Available as <code>AnalysisReport.gate</code> and the <code>selected_view</code>
 <h3><a href="#detail-level">Detail level</a></h3>
 <p>How much cycle evidence is included. <code>summary</code> supplies a witness; <code>component-edges</code>
 also lists every dependency inside the cyclic component. The <code>Details</code> type names
-these choices. Neither option enumerates every elementary cycle.</p>
+these choices. Neither option enumerates every elementary cycle. View-level
+dependency reporting is independent of cycle detail.</p>
 </article>
 <article class="glossary-term" id="analysis-failure-and-extension-failure">
 <h3><a href="#analysis-failure-and-extension-failure">Analysis failure and extension failure</a></h3>

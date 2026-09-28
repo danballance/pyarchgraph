@@ -23,8 +23,23 @@ reports. These are mechanism tests, not project-quality measurements.
 
 Manifest findings use readable import names; the evaluator resolves the report's
 opaque source IDs through its source inventory before comparing those
-expectations. Schema 0.7 finding envelopes are unwrapped for these independently
+expectations. Schema 0.8 finding envelopes are unwrapped for these independently
 maintained semantic expectations. Exact view IDs retain their hyphens.
 Schema, coverage status, view shape, exit code, counts and findings
 are checked separately. Source evidence and cycle witness closure receive
 additional pytest checks.
+
+Every default run now also reports `package-structural`, `package-non-typing` and
+`package-module-body`. The original source-gate expectations still describe the
+same source dependencies. Explore package grouping on an existing fixture with:
+
+```console
+uv run pyarchgraph examples/projects/valid_namespace_package --gate package-structural
+uv run pyarchgraph examples/projects/valid_namespace_package --gate package-non-typing --package-max-depth 1
+```
+
+Package reports include all dependencies and source evidence, regardless of
+whether a cycle exists. Namespace source modules group without initializers;
+imports of the namespace container alone do not add graph edges. The independent
+`custom_strategies.py` example demonstrates extension contracts and its own
+coarser grouping rule; it does not define the built-in package-view semantics.

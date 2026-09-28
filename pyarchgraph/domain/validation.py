@@ -38,7 +38,10 @@ class GraphValidator:
             facts=MappingProxyType({fact.id: fact for fact in snapshot.facts}),
             support=frozenset(
                 (edge.source, edge.target, item.fact_id, item.resolution_kind)
-                for edge in snapshot.dependencies
+                for edge in (
+                    *snapshot.dependencies,
+                    *(snapshot.resolved_dependencies or ()),
+                )
                 for item in edge.evidence
             ),
         )
@@ -179,6 +182,16 @@ class SnapshotNormalizer:
                 key=self._edge,
             )
         )
+        resolved = (
+            None
+            if snapshot.resolved_dependencies is None
+            else tuple(
+                sorted(
+                    (self._dependency(item) for item in snapshot.resolved_dependencies),
+                    key=self._edge,
+                )
+            )
+        )
         external = tuple(
             sorted(
                 (self._record(item) for item in snapshot.external_imports),
@@ -206,11 +219,18 @@ class SnapshotNormalizer:
             and sources == snapshot.sources
             and facts == snapshot.facts
             and dependencies == snapshot.dependencies
+            and (
+                snapshot.resolved_dependencies is None
+                or type(snapshot.resolved_dependencies) is tuple
+            )
+            and resolved == snapshot.resolved_dependencies
             and external == snapshot.external_imports
             and unresolved == snapshot.unresolved_imports
         ):
             return snapshot
-        return AnalysisSnapshot(sources, facts, dependencies, external, unresolved)
+        return AnalysisSnapshot(
+            sources, facts, dependencies, external, unresolved, resolved
+        )
 
     def _dependency(self, edge):
         evidence = (

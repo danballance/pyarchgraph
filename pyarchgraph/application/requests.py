@@ -15,6 +15,7 @@ class AnalysisOptions:
     details: Details = "summary"
     owned_prefixes: tuple[str, ...] = ()
     targets: tuple[TargetDeclaration, ...] = ()
+    package_max_depth: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -11,7 +11,15 @@ class OptionValidator:
     """Checks that analysis requests and options are valid before project access begins."""
 
     def __init__(
-        self, gates: tuple[str, ...] = ("structural", "non-typing", "module-body")
+        self,
+        gates: tuple[str, ...] = (
+            "structural",
+            "non-typing",
+            "module-body",
+            "package-structural",
+            "package-non-typing",
+            "package-module-body",
+        ),
     ) -> None:
         self.gates = gates
 
@@ -45,6 +53,10 @@ class OptionValidator:
             raise ValueError("gate must be a nonempty registered view ID")
         if options.details not in ("summary", "component-edges"):
             raise ValueError("details must be summary or component-edges")
+        if options.package_max_depth is not None and (
+            type(options.package_max_depth) is not int or options.package_max_depth < 1
+        ):
+            raise ValueError("package_max_depth must be a positive integer or null")
         if not isinstance(options.excludes, tuple):
             raise ValueError("excludes must be a tuple of relative glob strings")
         for pattern in options.excludes:

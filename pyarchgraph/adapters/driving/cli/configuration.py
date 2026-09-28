@@ -19,6 +19,7 @@ class TomlOptionsReader:
         gate: str,
         details: str,
         base_dir: Path | None = None,
+        package_max_depth: int | None = None,
     ) -> AnalysisOptions:
         """Read only the explicitly selected file; paths are relative to that file."""
         base = Path.cwd() if base_dir is None else Path(base_dir)
@@ -70,5 +71,6 @@ class TomlOptionsReader:
             details=details,
             owned_prefixes=prefixes,
             targets=targets,
+            package_max_depth=package_max_depth,
         )
         return options
