@@ -19,6 +19,7 @@ pyarchgraph = "pyarchgraph.__main__:main"
 
 [dependency-groups]
 dev = [
+  "import-linter>=2.7,<3",
   "pytest>=8.3,<9",
 ]
 
@@ -33,6 +34,7 @@ include = [
   "/examples",
   "/docs",
   "/README.md",
+  "/AGENTS.md",
   "/pyproject.toml",
 ]
 
@@ -42,3 +44,39 @@ testpaths = ["tests"]
 
 [tool.ruff.lint.per-file-ignores]
 "examples/projects/**/*.py" = ["ALL"]
+
+[tool.importlinter]
+root_package = "pyarchgraph"
+include_external_packages = true
+exclude_type_checking_imports = false
+
+[[tool.importlinter.contracts]]
+id = "inward-layers"
+name = "Runtime dependencies point inward"
+type = "layers"
+containers = ["pyarchgraph"]
+layers = ["__main__", "main", "adapters", "application", "domain"]
+exhaustive = true
+
+[[tool.importlinter.contracts]]
+id = "adapter-directions"
+name = "Driving and driven adapters are independent"
+type = "independence"
+modules = ["pyarchgraph.adapters.driving", "pyarchgraph.adapters.driven"]
+
+[[tool.importlinter.contracts]]
+id = "driven-components"
+name = "Driven adapter components are independent"
+type = "independence"
+modules = [
+  "pyarchgraph.adapters.driven.filesystem",
+  "pyarchgraph.adapters.driven.python_ast",
+  "pyarchgraph.adapters.driven.networkx_graph",
+]
+
+[[tool.importlinter.contracts]]
+id = "core-framework-isolation"
+name = "The core does not depend on external frameworks"
+type = "forbidden"
+source_modules = ["pyarchgraph.domain", "pyarchgraph.application"]
+forbidden_modules = ["networkx"]

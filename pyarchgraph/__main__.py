@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 
-from pyarchgraph.composition import ApplicationFactory
+from pyarchgraph.main import ApplicationFactory
 
 
 def main(argv: Sequence[str] | None = None) -> int:

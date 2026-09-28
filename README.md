@@ -151,22 +151,34 @@ build execution and initialization-order proof remain outside scope.
 
 ```python
 from pathlib import Path
-from pyarchgraph import AnalysisOptions, ApplicationFactory, JsonReportRenderer
+
+from pyarchgraph.adapters.driving.cli.application import CliExitCodePolicy
+from pyarchgraph.adapters.driving.cli.rendering import JsonReportRenderer
+from pyarchgraph.application.requests import AnalysisOptions, AnalysisRequest
+from pyarchgraph.main import ApplicationFactory
 
 analyzer = ApplicationFactory().create_analyzer()
 report = analyzer.analyse(
-    (Path("."), Path("src")),
-    options=AnalysisOptions(excludes=("examples",), gate="structural"),
+    AnalysisRequest(
+        source_roots=(Path("."),),
+        options=AnalysisOptions(
+            excludes=("examples", "docs", "benchmarks"), gate="structural"
+        ),
+    )
 )
 print(JsonReportRenderer().render(report), end="")
-print(report.status, report.exit_code)
+print(report.status, CliExitCodePolicy().exit_code(report))
 ```
 
 `AnalysisOptions` also accepts `details`, `owned_prefixes` and a tuple of frozen
-`TargetDeclaration` values. Invalid options raise `ValueError`; invalid roots
-raise `AnalysisError`. Source-analysis failures return an incomplete report.
-Reports and option/domain objects are frozen dataclasses. The report's
-`selected_view` and `exit_code` properties are conveniences, not serialized fields.
+`TargetDeclaration` values from `pyarchgraph.domain.models`. Pass options and roots
+inside an `AnalysisRequest`; `base_dir` is an optional request field. Invalid
+options raise `ValueError`; invalid roots raise `AnalysisError` from
+`pyarchgraph.application.exceptions`. Validation runs before external I/O.
+Source-analysis failures return an incomplete report. Requests, reports and
+option/domain objects are frozen dataclasses. The report's `selected_view`
+property is a convenience, not a serialized field. Exit-code policy belongs to
+the CLI adapter.
 
 Version 0.7 replaces the functional Python API and JSON schema 0.6. Views are an
 immutable mapping keyed by exact IDs, such as `report.views["module-body"]`.
@@ -176,15 +188,21 @@ Only error findings in the selected view return exit 1; incomplete coverage
 always returns exit 2. `base_dir` resolves relative roots and controls report paths.
 
 [Release and migration notes](docs/release-0.7.0.md) describe the breaking changes.
-Checksmith's strict schema 0.6 adapter needs a separate migration before the
-coordinated release.
+The [architecture and Python API migration guide](docs/architecture.md) describes
+the current package layout and explicit imports. Package initializers provide no
+API re-exports or compatibility aliases. This layout migration preserves JSON
+schema 0.7. Checksmith's strict schema 0.6 adapter needs a separate migration
+before the coordinated release.
 
 ## Extending analysis
 
 Runtime code follows ports and adapters: immutable models, resolution policies,
-and graph strategy contracts live in `domain`; orchestration and immutable
-registries live in `application`; filesystem, AST, TOML, NetworkX, CLI, and JSON
-implementations live in `adapters`. `ApplicationFactory` wires those parts.
+and graph strategy contracts live in `domain`; use cases, request/result values,
+ports and immutable registries live in `application`; CLI, TOML and JSON live in
+`adapters.driving.cli`; filesystem, AST and NetworkX live in `adapters.driven`.
+`main.ApplicationFactory` wires those parts. The
+[shared hexagonal guide](docs/hexagonal-architecture-guide.md) explains the
+conventions reused across projects.
 
 Supply Python objects implementing `GraphViewStrategy.transform(snapshot)` or
 `CheckStrategy.evaluate(context)` to the factory registry. Built-in implementations
@@ -205,10 +223,13 @@ and returns 2 without a report.
 
 ## Verification
 
-The [0.7 verification record](docs/verification-0.7.md) includes the supported
-Python matrix, packaging checks, corpus results, and reproducible benchmarks.
+The [architecture migration verification record](docs/verification-hexagonal.md)
+records this restructuring's checks. The historical
+[0.7 verification record](docs/verification-0.7.md) includes the earlier Python
+matrix, packaging checks, corpus results, and reproducible benchmarks.
 
 ```console
+uv run lint-imports
 uv run pytest -q
 uv run python -m examples.evaluate
 ```

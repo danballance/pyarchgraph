@@ -9,22 +9,18 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from pyarchgraph import (
+from pyarchgraph.application.strategies import CheckRegistration, ViewRegistration
+from pyarchgraph.domain.graph import (
     AnalysisSnapshot,
-    ApplicationFactory,
     CheckContext,
-    CheckRegistration,
-    CheckResult,
-    CheckStrategy,
-    GraphViewStrategy,
-    RuleFinding,
-    Severity,
     ViewEdge,
     ViewEvidence,
     ViewGraph,
     ViewNode,
-    ViewRegistration,
 )
+from pyarchgraph.domain.models import CheckResult, RuleFinding, Severity
+from pyarchgraph.domain.strategies import CheckStrategy, GraphViewStrategy
+from pyarchgraph.main import ApplicationFactory
 
 
 class PackageGroupingView(GraphViewStrategy):

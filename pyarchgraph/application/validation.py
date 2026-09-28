@@ -1,7 +1,10 @@
 """Validate requests before invoking any source or metadata adapter."""
 
-from pathlib import PurePosixPath
-from pyarchgraph.domain.model import AnalysisOptions, TargetDeclaration
+from pathlib import Path, PurePosixPath
+
+from pyarchgraph.application.exceptions import AnalysisError
+from pyarchgraph.application.requests import AnalysisOptions, AnalysisRequest
+from pyarchgraph.domain.models import TargetDeclaration
 
 
 class OptionValidator:
@@ -20,6 +23,18 @@ class OptionValidator:
                 for part in value.split(".")
             )
         )
+
+    def validate_request(self, request: AnalysisRequest) -> None:
+        if not isinstance(request, AnalysisRequest):
+            raise AnalysisError("request must be an AnalysisRequest instance")
+        if (
+            not isinstance(request.source_roots, tuple)
+            or not request.source_roots
+            or not all(isinstance(root, Path) for root in request.source_roots)
+        ):
+            raise AnalysisError("source_roots must be a nonempty tuple of directories")
+        if request.base_dir is not None and not isinstance(request.base_dir, Path):
+            raise AnalysisError("base_dir must be a Path or null")
 
     def validate(self, options: AnalysisOptions) -> None:
         if not isinstance(options, AnalysisOptions):

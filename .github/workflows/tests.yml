@@ -29,6 +29,8 @@ jobs:
         run: uv python install "${{ matrix.python-version }}"
       - name: Install locked development dependencies
         run: uv sync --frozen --group dev
+      - name: Check architectural dependencies
+        run: uv run --no-sync lint-imports
       - name: Run the test suite
         run: uv run --no-sync python -m pytest -q
       - name: Evaluate the architecture corpus

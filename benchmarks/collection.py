@@ -15,9 +15,9 @@ from pathlib import Path
 from statistics import median
 from time import perf_counter
 
-from pyarchgraph.adapters.extraction import ModuleImportExtractor
+from pyarchgraph.adapters.driven.python_ast import ModuleImportExtractor
 from pyarchgraph.domain.canonicalization import FactCanonicalizer
-from pyarchgraph.domain.model import ImportFact, ImportSyntax, SourceModule
+from pyarchgraph.domain.models import ImportFactDraft, ImportSyntax, SourceModule
 
 
 def reference_facts(module: SourceModule, source: str, tree: ast.Module):
@@ -26,8 +26,7 @@ def reference_facts(module: SourceModule, source: str, tree: ast.Module):
     for node, context in ModuleImportExtractor()._imports_with_context(module, tree):
         is_from = isinstance(node, ast.ImportFrom)
         for alias_index, alias in enumerate(node.names):
-            yield ImportFact(
-                id="",
+            yield ImportFactDraft(
                 source=module.id,
                 path=module.path,
                 line=node.lineno,
@@ -111,7 +110,7 @@ def main() -> None:
         "collector_source_sha256": hashlib.sha256(
             (
                 Path(__file__).resolve().parents[1]
-                / "pyarchgraph/adapters/extraction.py"
+                / "pyarchgraph/adapters/driven/python_ast.py"
             ).read_bytes()
         ).hexdigest(),
     }

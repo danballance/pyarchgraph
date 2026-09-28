@@ -1,6 +1,6 @@
 """Mandatory source-coverage policy, independent of optional analysis checks."""
 
-from pyarchgraph.domain.model import Diagnostic, Severity, TargetBoundary
+from pyarchgraph.domain.models import Diagnostic, Severity, TargetBoundary
 
 
 class CoveragePolicy:

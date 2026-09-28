@@ -1,12 +1,13 @@
 """Deterministic, filesystem-independent import-fact identities."""
 
 from __future__ import annotations
+
 import hashlib
 import json
 from collections.abc import Iterable
-from dataclasses import replace
 from itertools import pairwise
-from pyarchgraph.domain.model import ImportContext, ImportFact
+
+from pyarchgraph.domain.models import ImportContext, ImportFact, ImportFactDraft
 
 _FACT_ID_PREFIX_LENGTH = 12
 
@@ -30,7 +31,7 @@ class FactCanonicalizer:
     def _nullable_integer(self, value: int | None) -> int:
         return -1 if value is None else value
 
-    def _fact_sort_key(self, fact: ImportFact) -> tuple[object, ...]:
+    def _fact_sort_key(self, fact: ImportFactDraft) -> tuple[object, ...]:
         """Return the complete, normalized source-site ordering key."""
         return (
             fact.source,
@@ -50,7 +51,7 @@ class FactCanonicalizer:
             self._context_identity(fact.context),
         )
 
-    def _fact_identity(self, fact: ImportFact) -> tuple[object, ...]:
+    def _fact_identity(self, fact: ImportFactDraft) -> tuple[object, ...]:
         """Return the canonical, unnormalised tuple used to derive a fact ID."""
         return (
             fact.source,
@@ -70,7 +71,7 @@ class FactCanonicalizer:
             self._context_identity(fact.context),
         )
 
-    def _fact_digest(self, fact: ImportFact) -> str:
+    def _fact_digest(self, fact: ImportFactDraft) -> str:
         encoded_identity = json.dumps(
             self._fact_identity(fact),
             ensure_ascii=False,
@@ -102,7 +103,7 @@ class FactCanonicalizer:
             lengths[right] = max(lengths[right], length)
         return tuple((lengths[digest] for digest in digests))
 
-    def canonicalise(self, facts: Iterable[ImportFact]) -> tuple[ImportFact, ...]:
+    def canonicalise(self, facts: Iterable[ImportFactDraft]) -> tuple[ImportFact, ...]:
         """Sort facts and assign stable, collision-safe content-derived IDs."""
         ordered = tuple(sorted(facts, key=self._fact_sort_key))
         digests = tuple((self._fact_digest(fact) for fact in ordered))
@@ -113,7 +114,24 @@ class FactCanonicalizer:
         lengths = self._minimum_unique_prefix_lengths(digests)
         return tuple(
             (
-                replace(fact, id=f"fact-{digest[:length]}")
+                ImportFact(
+                    id=f"fact-{digest[:length]}",
+                    source=fact.source,
+                    path=fact.path,
+                    line=fact.line,
+                    column=fact.column,
+                    end_line=fact.end_line,
+                    end_column=fact.end_column,
+                    alias_index=fact.alias_index,
+                    syntax=fact.syntax,
+                    source_segment=fact.source_segment,
+                    base_module=fact.base_module,
+                    imported_name=fact.imported_name,
+                    as_name=fact.as_name,
+                    bound_name=fact.bound_name,
+                    relative_level=fact.relative_level,
+                    context=fact.context,
+                )
                 for fact, digest, length in zip(ordered, digests, lengths, strict=True)
             )
         )

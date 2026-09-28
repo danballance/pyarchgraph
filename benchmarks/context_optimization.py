@@ -16,8 +16,11 @@ PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 
 from benchmarks.reference_extraction import AstImportFactSource  # noqa: E402
-from pyarchgraph.adapters.discovery import FileSystemSourceDiscovery  # noqa: E402
-from pyarchgraph.composition import ApplicationFactory  # noqa: E402
+from pyarchgraph.adapters.driven.filesystem.discovery import (
+    FileSystemSourceDiscovery,  # noqa: E402
+)
+from pyarchgraph.domain.canonicalization import FactCanonicalizer  # noqa: E402
+from pyarchgraph.main import ApplicationFactory  # noqa: E402
 
 
 def main():
@@ -47,13 +50,24 @@ def main():
         for name in names:
             start = perf_counter()
             result = collectors[name].collect(root, inventory.modules)
+            # Both measurements include final fact IDs. The runtime collector
+            # now returns drafts, and canonicalization belongs to its caller.
+            facts = (
+                FactCanonicalizer().canonicalise(result.facts)
+                if name == "optimized"
+                else result.facts
+            )
             elapsed = perf_counter() - start
             timings[name].append(elapsed)
-            if previous is not None and result != previous:
+            observation = {
+                "facts": tuple(asdict(fact) for fact in facts),
+                "diagnostics": tuple(asdict(item) for item in result.diagnostics),
+            }
+            if previous is not None and observation != previous:
                 raise AssertionError(
                     "Collector facts, IDs, contexts or diagnostics differ"
                 )
-            previous = result
+            previous = observation
             print(
                 json.dumps(
                     {"iteration": iteration + 1, "collector": name, "seconds": elapsed}
@@ -62,7 +76,7 @@ def main():
             )
     assert previous is not None
     result_hash = hashlib.sha256(
-        json.dumps(asdict(previous), sort_keys=True).encode()
+        json.dumps(previous, sort_keys=True).encode()
     ).hexdigest()
     report = {
         "python": platform.python_version(),
@@ -70,7 +84,7 @@ def main():
         "source_root": str(root),
         "excludes": excludes,
         "source_module_count": len(inventory.modules),
-        "fact_count": len(previous.facts),
+        "fact_count": len(previous["facts"]),
         "facts_ids_contexts_diagnostics_equal": True,
         "collection_sha256": result_hash,
         "seconds": timings,
@@ -79,8 +93,11 @@ def main():
         "reference_source_sha256": hashlib.sha256(
             (PROJECT / "benchmarks/reference_extraction.py").read_bytes()
         ).hexdigest(),
+        "reference_models_sha256": hashlib.sha256(
+            (PROJECT / "benchmarks/reference_models.py").read_bytes()
+        ).hexdigest(),
         "optimized_source_sha256": hashlib.sha256(
-            (PROJECT / "pyarchgraph/adapters/extraction.py").read_bytes()
+            (PROJECT / "pyarchgraph/adapters/driven/python_ast.py").read_bytes()
         ).hexdigest(),
         "scope": "Repeated extraction from existing archived SymPy working directory; target source parsed, never executed. Includes context classification and fact IDs, excludes discovery/resolution/rendering.",
     }

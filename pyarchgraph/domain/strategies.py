@@ -13,7 +13,7 @@ from pyarchgraph.domain.graph import (
     ViewNode,
 )
 from pyarchgraph.domain.graph_algorithms import GraphAlgorithms, GraphHandle
-from pyarchgraph.domain.model import (
+from pyarchgraph.domain.models import (
     CheckResult,
     CycleFinding,
     Details,

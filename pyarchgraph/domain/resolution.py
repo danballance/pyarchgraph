@@ -5,13 +5,13 @@ from __future__ import annotations
 import importlib.util
 import sys
 from collections import defaultdict
-from dataclasses import dataclass, replace
 from collections.abc import Mapping
-from types import MappingProxyType
+from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
+from types import MappingProxyType
 from typing import Protocol
 
-from pyarchgraph.domain.model import (
+from pyarchgraph.domain.models import (
     DependencyEdge,
     DependencyEvidence,
     Diagnostic,

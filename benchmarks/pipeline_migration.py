@@ -1,15 +1,18 @@
-"""Compare schema-normalized 0.6 and 0.7 CLI reports and paired pipeline timing.
+"""Compare CLI reports and paired pipeline timing across runtime revisions.
 
 The baseline runtime is read from a pinned Git revision into a temporary
 directory; fixture applications and archived data are never modified. Run:
 python -m benchmarks.pipeline_migration --output /tmp/pipeline.json
 Add --research-case sympy when the archived working directory is available.
+For a behaviour-preserving refactor, select its pre-change revision with
+--baseline-ref and pass --exact-schema to compare complete CLI output.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import io
 import json
 import os
@@ -51,14 +54,15 @@ def normalized(report):
 
 def worker(case):
     sys.path.insert(0, case["runtime"])
-    if case["implementation"] == "baseline":
-        from pyarchgraph.cli import main
-
-        run = main
+    runtime = Path(case["runtime"]) / "pyarchgraph"
+    if (runtime / "main.py").is_file():
+        composition = importlib.import_module("pyarchgraph.main")
+        run = composition.ApplicationFactory().create_cli().run
+    elif (runtime / "composition.py").is_file():
+        composition = importlib.import_module("pyarchgraph.composition")
+        run = composition.ApplicationFactory().create_cli().run
     else:
-        from pyarchgraph import ApplicationFactory
-
-        run = ApplicationFactory().create_cli().run
+        run = importlib.import_module("pyarchgraph.cli").main
     os.chdir(PROJECT)
     results = []
     case_timings = {}
@@ -68,7 +72,16 @@ def worker(case):
         stdout, stderr = io.StringIO(), io.StringIO()
         started, cpu_started = time.perf_counter(), time.process_time()
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            code = run(item["arguments"])
+            try:
+                code = run(item["arguments"])
+            except SystemExit as error:
+                code = (
+                    error.code
+                    if isinstance(error.code, int)
+                    else int(error.code is not None)
+                )
+                if error.code is not None and not isinstance(error.code, int):
+                    print(error.code, file=sys.stderr)
         case_timings[item["name"]] = {
             "wall_seconds": time.perf_counter() - started,
             "cpu_seconds": time.process_time() - cpu_started,
@@ -77,8 +90,11 @@ def worker(case):
             "name": item["name"],
             "exit_code": code,
             "stderr": stderr.getvalue(),
-            "report": normalized(json.loads(stdout.getvalue())),
         }
+        if case["exact_schema"]:
+            result["stdout"] = stdout.getvalue()
+        else:
+            result["report"] = normalized(json.loads(stdout.getvalue()))
         results.append(result)
         case_hashes[item["name"]] = hashlib.sha256(
             json.dumps(result, sort_keys=True).encode()
@@ -101,6 +117,11 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--baseline-ref", default=BASELINE_REF)
+    parser.add_argument(
+        "--exact-schema",
+        action="store_true",
+        help="compare complete stdout, stderr and exit codes without schema normalization",
+    )
     parser.add_argument("--research-case", action="append", default=[])
     args = parser.parse_args()
     if args.worker:
@@ -191,6 +212,7 @@ def main():
                         baseline if implementation == "baseline" else PROJECT
                     ),
                     "implementation": implementation,
+                    "exact_schema": args.exact_schema,
                     "cases": cases,
                 }
                 result = subprocess.run(
@@ -206,7 +228,7 @@ def main():
                     and observation["semantic_sha256"] != reference
                 ):
                     raise AssertionError(
-                        "normalized 0.6/0.7 reports or exit codes differ: "
+                        "CLI reports, stderr or exit codes differ: "
                         + ", ".join(
                             name
                             for name, digest in observation[
@@ -249,14 +271,19 @@ def main():
         "current_sources_unchanged_during_run": True,
         "repeats": args.repeats,
         "case_count": len(cases),
-        "schema_normalized_reports_exit_codes_equal": True,
+        "comparison": "exact-cli" if args.exact_schema else "schema-normalized",
+        (
+            "exact_cli_output_equal"
+            if args.exact_schema
+            else "schema_normalized_reports_exit_codes_equal"
+        ): True,
         "seconds": timings,
         "median_seconds": medians,
         "current_over_baseline_ratio": {
             metric: medians["current"][metric] / medians["baseline"][metric]
             for metric in ("wall_seconds", "cpu_seconds")
         },
-        "scope": "40 committed corpus runs, 240-module synthetic graph and optional archived research cases; includes real CLI parsing, discovery, extraction, resolution, graph strategies and rendering; process startup and schema normalization excluded",
+        "scope": "40 committed corpus runs, 240-module synthetic graph and optional archived research cases; includes real CLI parsing, discovery, extraction, resolution, graph strategies and rendering; process startup and output comparison excluded",
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

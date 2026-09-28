@@ -71,7 +71,7 @@ def worker(case):
     hashes_before = analyzer_hashes()
     sys.path.insert(0, str(PROJECT))
     from pyarchgraph.application.strategies import StrategyEngine
-    from pyarchgraph.composition import ApplicationFactory
+    from pyarchgraph.main import ApplicationFactory
 
     graphs = {}
     self_evidence = []
@@ -188,7 +188,7 @@ def worker(case):
             "extraction_functions": [
                 item
                 for item in functions
-                if item["file"].endswith("pyarchgraph/adapters/extraction.py")
+                if item["file"].endswith("pyarchgraph/adapters/driven/python_ast.py")
             ],
             "scope": "One instrumented current SymPy CLI invocation; cumulative timings overlap and include profiler overhead.",
         }
@@ -858,7 +858,7 @@ def profile_comparison(output):
     old_segments = operation(baseline["top_functions"], "get_source_segment")
     collection = operation(current["extraction_functions"], "collect")
     segments = operation(current["extraction_functions"], "segment")
-    from pyarchgraph.adapters.extraction import _SourceText
+    from pyarchgraph.adapters.driven.python_ast import _SourceText
 
     cache = operation(
         current["extraction_functions"],
