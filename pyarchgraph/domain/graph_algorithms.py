@@ -4,7 +4,7 @@ from typing import Protocol
 
 
 class GraphHandle(Protocol):
-    """An analysis-local prepared graph, reusable for component queries."""
+    """Provide reusable component and witness queries for one analysis's graph."""
 
     def strongly_connected_components(self) -> tuple[tuple[str, ...], ...]: ...
 
@@ -23,6 +23,8 @@ class GraphHandle(Protocol):
 
 
 class GraphAlgorithms(Protocol):
+    """Define how cycle analysis prepares a graph without choosing a graph library."""
+
     def prepare(
         self, nodes: tuple[str, ...], edges: tuple[tuple[str, str], ...]
     ) -> GraphHandle:

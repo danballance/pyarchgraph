@@ -33,7 +33,7 @@ from pyarchgraph.domain.models import (
 
 @dataclass(frozen=True, slots=True)
 class BindingIndex:
-    """A call's immutable import-name bindings and declared target boundaries."""
+    """Hold immutable source bindings, ownership and targets for one resolution."""
 
     by_id: Mapping[str, SourceModule]
     names: Mapping[str, tuple[SourceModule, ...]]
@@ -118,7 +118,7 @@ class BindingIndex:
 
 
 class _ResolutionSession:
-    """Accumulate one resolution without retaining mutable results on services."""
+    """Keep results accumulated during one resolution separate from later analyses."""
 
     def __init__(self, index: BindingIndex) -> None:
         self.index = index
@@ -396,6 +396,8 @@ class _ResolutionSession:
 
 
 class ImportResolver(Protocol):
+    """Define how import facts are interpreted using sources and target declarations."""
+
     def resolve(
         self,
         facts: tuple[ImportFact, ...],
@@ -408,7 +410,7 @@ class ImportResolver(Protocol):
 
 
 class StaticImportResolver(ImportResolver):
-    """Resolve facts from declared bindings without inspecting installed packages."""
+    """Match imports using declared bindings without inspecting installed packages."""
 
     def resolve(
         self,
@@ -426,7 +428,7 @@ class StaticImportResolver(ImportResolver):
 
 
 class ArchitectureDependencyPolicy:
-    """Select source-backed architecture relations before view filtering."""
+    """Select dependencies before views, removing redundant package-base edges."""
 
     def select(
         self, dependencies: tuple[DependencyEdge, ...]

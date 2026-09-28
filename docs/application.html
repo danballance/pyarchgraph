@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Requests, collection contracts, catalogue assembly, strategy coordination, and reports.">
+<title>Application · PyArchGraph package guide</title>
+<style>
+:root { color-scheme: light; --ink: #172b31; --muted: #52656a; --paper: #fff; --wash: #f5f7f6; --line: #dbe3e1; --accent: #12685f; --tint: #eaf5f1; }
+* { box-sizing: border-box; }
+html { scroll-padding-top: 1.5rem; }
+body { margin: 0; background: var(--wash); color: var(--ink); font: 16px/1.65 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+a { color: var(--accent); text-underline-offset: .2em; text-decoration-thickness: 1px; }
+a:hover { text-decoration-thickness: 2px; }
+a:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 2px; }
+code { font: .86em/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; }
+p { margin: .65rem 0 1rem; }
+strong { font-weight: 650; }
+h1, h2, h3 { line-height: 1.2; font-weight: 650; letter-spacing: -.035em; }
+h1 { font-size: clamp(2.8rem, 7vw, 4.8rem); margin: .3rem 0 1rem; }
+h2 { font-size: 1.8rem; margin: 0 0 1rem; }
+h3 { font-size: 1.15rem; margin: 0 0 .7rem; letter-spacing: -.015em; }
+.skip { position: absolute; left: 1rem; top: -6rem; padding: .5rem 1rem; background: white; z-index: 5; }
+.skip:focus { top: .5rem; }
+.topbar { background: var(--paper); border-bottom: 1px solid var(--line); }
+.topbar-inner { max-width: 1200px; margin: auto; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.brand { color: var(--ink); text-decoration: none; font-weight: 700; letter-spacing: -.02em; }
+.brand span { font-size: .8rem; font-weight: 450; color: var(--muted); margin-left: .7rem; }
+.package-nav { display: flex; gap: .4rem; flex-wrap: wrap; font-size: .88rem; }
+.package-nav a { padding: .35rem .75rem; border-radius: 5px; text-decoration: none; color: var(--muted); }
+.package-nav a[aria-current="page"] { color: var(--accent); background: var(--tint); font-weight: 650; }
+.package-nav a:hover { background: var(--wash); }
+.layout { max-width: 1200px; margin: auto; display: grid; grid-template-columns: 218px minmax(0, 1fr); gap: 3rem; padding: 2.5rem 2rem 4rem; align-items: start; }
+.sidebar { position: sticky; top: 1.5rem; font-size: .87rem; }
+.eyebrow { font-size: .72rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--accent); margin: 0 0 .8rem; }
+.sidebar ul { list-style: none; margin: 0; padding: 0; }
+.sidebar li { margin: .2rem 0; }
+.sidebar a { display: block; padding: .4rem 0; text-decoration: none; color: var(--muted); }
+.sidebar a:hover { color: var(--accent); text-decoration: underline; }
+.sidebar .related { border-top: 1px solid var(--line); margin-top: 1.2rem; padding-top: 1rem; }
+main { min-width: 0; }
+.hero { padding: .1rem 0 2.3rem; }
+.hero .lede { font-size: 1.23rem; line-height: 1.5; max-width: 38rem; margin: 0 0 1.2rem; }
+.meta { color: var(--muted); display: flex; flex-wrap: wrap; gap: .4rem 1rem; font-size: .8rem; }
+.meta span + span { border-left: 1px solid var(--line); padding-left: 1rem; }
+.content-section { border-top: 1px solid var(--line); padding-top: 2rem; margin-bottom: 2.5rem; scroll-margin-top: 1.5rem; }
+.intro { color: var(--muted); }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; margin: 1.5rem 0; }
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 1.1rem; }
+.card h3 { font-size: 1rem; }
+.card p { font-size: .88rem; margin: 0; color: var(--muted); }
+.example { margin: 1.5rem 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); }
+.example figcaption { padding: .6rem 1rem; background: var(--tint); color: var(--accent); font-size: .8rem; font-weight: 650; }
+.source-pair { display: grid; grid-template-columns: 1fr 1fr; }
+.source-pair pre { margin: 0; padding: 1rem; font-size: .91rem; overflow-x: auto; }
+.source-pair pre + pre { border-left: 1px solid var(--line); }
+.comment { color: var(--muted); }
+.note { padding: 1rem 1.2rem; background: var(--tint); border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; margin: 1.2rem 0; font-size: .94rem; }
+.note p { margin: 0; }
+.steps { list-style: none; counter-reset: step; padding: 0; margin: 1.3rem 0; }
+.steps > li { counter-increment: step; position: relative; padding: 0 0 1.1rem 3rem; }
+.steps > li::before { content: counter(step, decimal-leading-zero); position: absolute; top: 0; left: 0; color: var(--accent); font: 600 .83rem/1.8 ui-monospace, monospace; }
+.steps > li + li { padding-top: 1rem; border-top: 1px solid var(--line); }
+.steps > li + li::before { top: 1rem; }
+.steps h3 { margin: .1rem 0 .35rem; }
+.steps p { margin: 0; color: var(--muted); }
+.table-wrap { overflow-x: auto; margin: 1.2rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+caption { text-align: left; font-weight: 650; margin-bottom: .7rem; }
+th, td { padding: .8rem .9rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-size: .75rem; letter-spacing: .04em; background: var(--tint); }
+td:first-child { width: 30%; }
+.module-map td:first-child { width: 37%; }
+.module-links { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1.1rem 0 1.7rem; }
+.module-links a { padding: .35rem .6rem; background: var(--paper); border: 1px solid var(--line); border-radius: 5px; font-size: .77rem; text-decoration: none; }
+.module { margin: 0 0 1.7rem; padding: 1.1rem 1.25rem .25rem; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; scroll-margin-top: 1.5rem; }
+.module h3 { overflow-wrap: anywhere; margin: 0 0 .45rem; }
+.module > p { color: var(--muted); margin: 0 0 1rem; font-size: .86rem; }
+.class-list { margin: 0; }
+.class-entry { border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.2fr); gap: 1rem; padding: .85rem 0; scroll-margin-top: 1.5rem; }
+dt { font-weight: 600; min-width: 0; }
+dt a { text-decoration: none; }
+dt a:hover { text-decoration: underline; }
+dd { margin: 0; font-size: .88rem; line-height: 1.6; color: var(--muted); }
+.helper { display: block; font-size: .68rem; font-weight: 450; color: var(--muted); margin-top: .2rem; }
+footer { border-top: 1px solid var(--line); padding-top: 1.2rem; color: var(--muted); font-size: .8rem; display: flex; flex-wrap: wrap; justify-content: space-between; gap: .7rem; }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 165px minmax(0, 1fr); gap: 1.8rem; padding-left: 1.5rem; padding-right: 1.5rem; }
+  .cards { grid-template-columns: 1fr; }
+  .class-entry { grid-template-columns: 1fr; gap: .3rem; }
+}
+@media (max-width: 650px) {
+  .topbar-inner { padding: 1rem 1.1rem; gap: .7rem; }
+  .brand span { margin-left: .35rem; }
+  .package-nav { gap: 0; }
+  .package-nav a { padding: .3rem .6rem; }
+  .layout { display: block; padding: 1.4rem 1.1rem 2rem; }
+  .sidebar { position: static; margin: 0 0 1.7rem; padding: 0 0 1rem; border-bottom: 1px solid var(--line); }
+  .sidebar ul { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
+  .sidebar a { padding: .15rem 0; }
+  .sidebar .related { border: 0; padding: 0; margin-top: .55rem; }
+  .sidebar .eyebrow { margin-bottom: .4rem; }
+  .hero { padding-bottom: 1.6rem; }
+  h2 { font-size: 1.55rem; }
+  .hero .lede { font-size: 1.08rem; }
+  .source-pair { grid-template-columns: 1fr; }
+  .source-pair pre + pre { border-left: 0; border-top: 1px solid var(--line); }
+  th, td { padding: .6rem; }
+  td:first-child, .module-map td:first-child { width: 40%; }
+  .module { padding: 1rem 1rem .2rem; }
+}
+@media print {
+  body { background: white; color: black; font-size: 10pt; }
+  .topbar, .sidebar, .skip, .module-links { display: none; }
+  .layout { display: block; max-width: none; padding: 0; }
+  h1 { font-size: 32pt; }
+  h2 { font-size: 18pt; break-after: avoid; }
+  h3, dt { break-after: avoid; }
+  a { color: inherit; text-decoration: none; }
+  .hero { padding-bottom: 1rem; }
+  .content-section { padding-top: 1rem; margin-bottom: 1.3rem; }
+  .card, .class-entry, .note, .example, tr { break-inside: avoid; }
+  .module { border: 0; padding: 0; }
+  .class-entry { grid-template-columns: minmax(0, .9fr) minmax(0, 1.2fr); }
+  .table-wrap { overflow: visible; }
+  footer { margin-top: 1rem; }
+}
+
+:root { --accent: #805617; --tint: #fbf2e2; }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar"><div class="topbar-inner">
+<a class="brand" href="../README.md">PyArchGraph <span>Package guides</span></a>
+<nav class="package-nav" aria-label="Package guides"><a href="domain.html">Domain</a>
+<a href="application.html" aria-current="page">Application</a>
+<a href="adapters.html">Adapters</a><a href="glossary.html">Glossary</a></nav>
+</div></header>
+<div class="layout">
+<aside class="sidebar"><p class="eyebrow">On this page</p><nav aria-label="On this page"><ul><li><a href="#role">Its role</a></li>
+<li><a href="#walkthrough">Follow a request</a></li>
+<li><a href="#outcomes">Reports and failures</a></li>
+<li><a href="#modules">Module map</a></li>
+<li><a href="#classes">Every class</a></li></ul></nav>
+<nav class="related" aria-label="Related documentation"><ul><li><a href="glossary.html">Terminology glossary ↗</a></li><li><a href="architecture.md">Architecture overview ↗</a></li></ul></nav></aside>
+<main id="main">
+<header class="hero"><p class="eyebrow">Package 02 / pyarchgraph.application</p><h1>Application</h1>
+<p class="lede">Organises one analysis, from the request through collection and checks to the final report.</p><div class="meta"><span>11 modules</span><span>27 classes</span><span>Walkthrough + class index</span></div></header>
+<section class="content-section" id="role">
+<h2>Its role</h2>
+
+<p>The application turns a caller's choices into an organised analysis run. Its incoming <a href="glossary.html#port-and-protocol">port</a> is <code>ProjectAnalyzer.analyse(request)</code>; <code>AnalyseProject</code> implements that workflow.</p>
+<div class="cards">
+<div class="card"><h3>Accept a request</h3><p>Validate source roots, options, and the selected gate before collection.</p></div>
+<div class="card"><h3>Coordinate the work</h3><p>Collect sources through ports and call domain rules in the required order.</p></div>
+<div class="card"><h3>Assemble a report</h3><p>Bring coverage, view results, and findings together for the caller.</p></div>
+</div>
+<p>Filesystem access, parsing, and graph-library operations arrive through injected collaborators. The application itself performs no external I/O. This allows the same workflow to run with real adapters or in-memory substitutes.</p>
+</section>
+<section class="content-section" id="walkthrough">
+<h2>Follow a request</h2>
+
+<p>A caller supplies <code>demo</code> as the source root, its parent as the base directory, and the default analysis options.</p>
+<figure class="example">
+<figcaption>The same two-file example in all three guides</figcaption>
+<div class="source-pair"><pre><code><span class="comment"># demo/orders.py</span>
+import inventory</code></pre><pre><code><span class="comment"># demo/inventory.py</span>
+import orders</code></pre></div>
+</figure>
+<ol class="steps">
+<li><h3>Validate and locate</h3><p><code>OptionValidator</code> checks the request and options. <code>ProjectAccess</code> then locates the roots and base directory. Invalid requests stop before source discovery or metadata access.</p></li>
+<li><h3>Collect a catalogue</h3><p><code>SourceCatalogBuilder</code> asks <code>SourceDiscovery</code> for sources and <code>ImportFactSource</code> for drafts. It applies shared report paths and source IDs, reconciles bindings across roots, and asks the domain canonicaliser to assign fact IDs. The result is one <code>SourceCatalog</code>.</p></li>
+<li><h3>Resolve and assess scope</h3><p><code>AnalyseProject</code> combines discovered and configured targets, calls the import resolver, and gathers coverage diagnostics. <code>LayoutDiagnosticService</code> uses project observations to flag questionable root choices without changing the selected roots.</p></li>
+<li><h3>Run registered views and checks</h3><p>The use case builds an <code>AnalysisSnapshot</code>. <code>StrategyEngine</code> normalises it, builds and validates each registered view, prepares its cycle analysis, and runs its selected checks. It attaches check IDs to findings and creates a <code>ViewReport</code> for each view.</p></li>
+<li><h3>Return the assembled report</h3><p>The domain coverage policy determines completeness. <code>AnalyseProject</code> combines sources, coverage, and all view reports in an <code>AnalysisReport</code>. The configured analyser can be reused; each run keeps its observations separate.</p></li>
+</ol>
+<div class="note"><p>The catalogue holds collected sources and facts. The snapshot supplies the analysis shared by views. The report holds the completed results. Each has a different job in the workflow.</p></div>
+</section>
+<section class="content-section" id="outcomes">
+<h2>Reports and failures</h2>
+
+<p>For the example, <code>report.status</code> is <code>complete</code>, while every built-in view contains a cycle error finding. The default <code>gate</code> is <code>structural</code>, and <code>report.selected_view</code> gives convenient access to that view's report.</p>
+<div class="table-wrap"><table><caption>What the caller receives</caption><thead><tr><th scope="col">Situation</th><th scope="col">Application outcome</th></tr></thead><tbody>
+<tr><td>No error diagnostics or unacknowledged boundaries</td><td>A complete report, which may still contain check findings.</td></tr>
+<tr><td>A selected source cannot be read or parsed</td><td>An incomplete report with source diagnostics and any recovered results.</td></tr>
+<tr><td>A referenced boundary is unacknowledged</td><td>An incomplete report showing the missing implementation coverage.</td></tr>
+<tr><td>Invalid request or analysis setup</td><td>A validation error, such as <code>AnalysisError</code> or <code>ValueError</code>, rather than a report.</td></tr>
+<tr><td>A registered view or check fails validation or raises</td><td><code>ExtensionError</code> identifies the failing extension; no report is returned.</td></tr>
+</tbody></table></div>
+<p><code>StrategyRegistry</code> names the available views and checks and selects checks per view. Custom strategies use the same workflow and result validation. An empty check selection leaves coverage requirements in place; cycle counts are still computed for the view.</p>
+<p>The application returns Python values. The CLI adapter is responsible for JSON presentation and <a href="glossary.html#exit-code">exit codes</a>. Changing the gate selects which findings determine the CLI result; it does not reduce the coverage requirements.</p>
+</section>
+<section class="content-section" id="modules">
+<h2>Module map</h2>
+<p class="intro">Choose a module to jump to its classes below. Package initialisers are intentionally empty; callers import from the defining modules.</p><div class="table-wrap"><table class="module-map"><caption>Where each responsibility lives</caption><thead><tr><th scope="col">Module</th><th scope="col">Responsibility</th></tr></thead><tbody>
+<tr><td><a href="#module-requests"><code>requests.py</code></a></td><td>The roots and options supplied by a caller.</td></tr>
+<tr><td><a href="#module-ports-analysis"><code>ports/analysis.py</code></a></td><td>The incoming contract for requesting an analysis.</td></tr>
+<tr><td><a href="#module-ports-project"><code>ports/project.py</code></a></td><td>Contracts and observations for project locations and packaging clues.</td></tr>
+<tr><td><a href="#module-ports-sources"><code>ports/sources.py</code></a></td><td>Contracts and observations for source discovery and import collection.</td></tr>
+<tr><td><a href="#module-validation"><code>validation.py</code></a></td><td>Request and option checks before project access.</td></tr>
+<tr><td><a href="#module-catalog"><code>catalog.py</code></a></td><td>Combining source observations into one catalogue.</td></tr>
+<tr><td><a href="#module-scope"><code>scope.py</code></a></td><td>Diagnostics about roots that may not match the project layout.</td></tr>
+<tr><td><a href="#module-strategies"><code>strategies.py</code></a></td><td>Named view/check registrations and their execution.</td></tr>
+<tr><td><a href="#module-use_cases-analyse_project"><code>use_cases/analyse_project.py</code></a></td><td>The workflow that coordinates a complete analysis run.</td></tr>
+<tr><td><a href="#module-results"><code>results.py</code></a></td><td>The report and its coverage, views, and registered findings.</td></tr>
+<tr><td><a href="#module-exceptions"><code>exceptions.py</code></a></td><td>Failures at the analysis and extension boundaries.</td></tr>
+</tbody></table></div>
+</section>
+<section class="content-section" id="classes">
+<h2>Every class</h2>
+<p class="intro">All 27 classes in this package, including value types, contracts, and internal helpers. Names link to the source file; descriptions match the role summaries in the code.</p>
+<nav class="module-links" aria-label="Class index by module"><a href="#module-requests"><code>requests.py</code></a>
+<a href="#module-ports-analysis"><code>ports/analysis.py</code></a>
+<a href="#module-ports-project"><code>ports/project.py</code></a>
+<a href="#module-ports-sources"><code>ports/sources.py</code></a>
+<a href="#module-validation"><code>validation.py</code></a>
+<a href="#module-catalog"><code>catalog.py</code></a>
+<a href="#module-scope"><code>scope.py</code></a>
+<a href="#module-strategies"><code>strategies.py</code></a>
+<a href="#module-use_cases-analyse_project"><code>use_cases/analyse_project.py</code></a>
+<a href="#module-results"><code>results.py</code></a>
+<a href="#module-exceptions"><code>exceptions.py</code></a></nav>
+<section class="module" id="module-requests"><h3><a href="../pyarchgraph/application/requests.py"><code>requests.py</code></a></h3><p>The roots and options supplied by a caller.</p><dl class="class-list">
+<div class="class-entry" id="class-AnalysisOptions" data-class="pyarchgraph.application.requests.AnalysisOptions"><dt><a href="../pyarchgraph/application/requests.py"><code>AnalysisOptions</code></a></dt><dd>Selects the analysis scope, gate view and level of report detail.</dd></div>
+<div class="class-entry" id="class-AnalysisRequest" data-class="pyarchgraph.application.requests.AnalysisRequest"><dt><a href="../pyarchgraph/application/requests.py"><code>AnalysisRequest</code></a></dt><dd>Describes the source roots and options for one project analysis.</dd></div>
+</dl></section>
+<section class="module" id="module-ports-analysis"><h3><a href="../pyarchgraph/application/ports/analysis.py"><code>ports/analysis.py</code></a></h3><p>The incoming contract for requesting an analysis.</p><dl class="class-list">
+<div class="class-entry" id="class-ProjectAnalyzer" data-class="pyarchgraph.application.ports.analysis.ProjectAnalyzer"><dt><a href="../pyarchgraph/application/ports/analysis.py"><code>ProjectAnalyzer</code></a></dt><dd>Defines how callers request a project analysis and receive its report.</dd></div>
+</dl></section>
+<section class="module" id="module-ports-project"><h3><a href="../pyarchgraph/application/ports/project.py"><code>ports/project.py</code></a></h3><p>Contracts and observations for project locations and packaging clues.</p><dl class="class-list">
+<div class="class-entry" id="class-ProjectLocation" data-class="pyarchgraph.application.ports.project.ProjectLocation"><dt><a href="../pyarchgraph/application/ports/project.py"><code>ProjectLocation</code></a></dt><dd>Identifies the import roots and shared base directory for an analysis.</dd></div>
+<div class="class-entry" id="class-ProjectMetadata" data-class="pyarchgraph.application.ports.project.ProjectMetadata"><dt><a href="../pyarchgraph/application/ports/project.py"><code>ProjectMetadata</code></a></dt><dd>Carries packaging clues used to assess whether import roots match the project layout.</dd></div>
+<div class="class-entry" id="class-DirectoryLocation" data-class="pyarchgraph.application.ports.project.DirectoryLocation"><dt><a href="../pyarchgraph/application/ports/project.py"><code>DirectoryLocation</code></a></dt><dd>Records the location and existence of a possible import root.</dd></div>
+<div class="class-entry" id="class-ProjectAccess" data-class="pyarchgraph.application.ports.project.ProjectAccess"><dt><a href="../pyarchgraph/application/ports/project.py"><code>ProjectAccess</code></a></dt><dd>Provides project locations and layout observations to the analysis workflow.</dd></div>
+</dl></section>
+<section class="module" id="module-ports-sources"><h3><a href="../pyarchgraph/application/ports/sources.py"><code>ports/sources.py</code></a></h3><p>Contracts and observations for source discovery and import collection.</p><dl class="class-list">
+<div class="class-entry" id="class-ExcludedPath" data-class="pyarchgraph.application.ports.sources.ExcludedPath"><dt><a href="../pyarchgraph/application/ports/sources.py"><code>ExcludedPath</code></a></dt><dd>Records a path left out of source discovery and the rule that excluded it.</dd></div>
+<div class="class-entry" id="class-DiscoveryResult" data-class="pyarchgraph.application.ports.sources.DiscoveryResult"><dt><a href="../pyarchgraph/application/ports/sources.py"><code>DiscoveryResult</code></a></dt><dd>Collects the sources, possible import targets and scope observations found in one root.</dd></div>
+<div class="class-entry" id="class-FactCollection" data-class="pyarchgraph.application.ports.sources.FactCollection"><dt><a href="../pyarchgraph/application/ports/sources.py"><code>FactCollection</code></a></dt><dd>Carries import drafts and diagnostics collected from source files.</dd></div>
+<div class="class-entry" id="class-SourceDiscovery" data-class="pyarchgraph.application.ports.sources.SourceDiscovery"><dt><a href="../pyarchgraph/application/ports/sources.py"><code>SourceDiscovery</code></a></dt><dd>Defines how the application discovers sources and import targets within a root.</dd></div>
+<div class="class-entry" id="class-ImportFactSource" data-class="pyarchgraph.application.ports.sources.ImportFactSource"><dt><a href="../pyarchgraph/application/ports/sources.py"><code>ImportFactSource</code></a></dt><dd>Defines how the application obtains import drafts from discovered sources.</dd></div>
+</dl></section>
+<section class="module" id="module-validation"><h3><a href="../pyarchgraph/application/validation.py"><code>validation.py</code></a></h3><p>Request and option checks before project access.</p><dl class="class-list">
+<div class="class-entry" id="class-OptionValidator" data-class="pyarchgraph.application.validation.OptionValidator"><dt><a href="../pyarchgraph/application/validation.py"><code>OptionValidator</code></a></dt><dd>Checks that analysis requests and options are valid before project access begins.</dd></div>
+</dl></section>
+<section class="module" id="module-catalog"><h3><a href="../pyarchgraph/application/catalog.py"><code>catalog.py</code></a></h3><p>Combining source observations into one catalogue.</p><dl class="class-list">
+<div class="class-entry" id="class-SourceCatalog" data-class="pyarchgraph.application.catalog.SourceCatalog"><dt><a href="../pyarchgraph/application/catalog.py"><code>SourceCatalog</code></a></dt><dd>Brings together sources, import facts and coverage observations from all roots.</dd></div>
+<div class="class-entry" id="class-SourceCatalogBuilder" data-class="pyarchgraph.application.catalog.SourceCatalogBuilder"><dt><a href="../pyarchgraph/application/catalog.py"><code>SourceCatalogBuilder</code></a></dt><dd>Assembles one source catalogue and gives collected import drafts stable identities.</dd></div>
+</dl></section>
+<section class="module" id="module-scope"><h3><a href="../pyarchgraph/application/scope.py"><code>scope.py</code></a></h3><p>Diagnostics about roots that may not match the project layout.</p><dl class="class-list">
+<div class="class-entry" id="class-LayoutDiagnosticService" data-class="pyarchgraph.application.scope.LayoutDiagnosticService"><dt><a href="../pyarchgraph/application/scope.py"><code>LayoutDiagnosticService</code></a></dt><dd>Reports evidence that the selected import roots do not match the project layout.</dd></div>
+</dl></section>
+<section class="module" id="module-strategies"><h3><a href="../pyarchgraph/application/strategies.py"><code>strategies.py</code></a></h3><p>Named view/check registrations and their execution.</p><dl class="class-list">
+<div class="class-entry" id="class-ViewRegistration" data-class="pyarchgraph.application.strategies.ViewRegistration"><dt><a href="../pyarchgraph/application/strategies.py"><code>ViewRegistration</code></a></dt><dd>Gives a graph view strategy the name used to select it and report its results.</dd></div>
+<div class="class-entry" id="class-CheckRegistration" data-class="pyarchgraph.application.strategies.CheckRegistration"><dt><a href="../pyarchgraph/application/strategies.py"><code>CheckRegistration</code></a></dt><dd>Names a check strategy and identifies the graph views it can evaluate.</dd></div>
+<div class="class-entry" id="class-StrategyRegistry" data-class="pyarchgraph.application.strategies.StrategyRegistry"><dt><a href="../pyarchgraph/application/strategies.py"><code>StrategyRegistry</code></a></dt><dd>Defines the available graph views and checks, and which checks run for each view.</dd></div>
+<div class="class-entry" id="class-StrategyEngine" data-class="pyarchgraph.application.strategies.StrategyEngine"><dt><a href="../pyarchgraph/application/strategies.py"><code>StrategyEngine</code></a></dt><dd>Runs registered graph views and checks, validates their results and assembles view reports.</dd></div>
+</dl></section>
+<section class="module" id="module-use_cases-analyse_project"><h3><a href="../pyarchgraph/application/use_cases/analyse_project.py"><code>use_cases/analyse_project.py</code></a></h3><p>The workflow that coordinates a complete analysis run.</p><dl class="class-list">
+<div class="class-entry" id="class-AnalyseProject" data-class="pyarchgraph.application.use_cases.analyse_project.AnalyseProject"><dt><a href="../pyarchgraph/application/use_cases/analyse_project.py"><code>AnalyseProject</code></a></dt><dd>Coordinates source collection, import resolution and checks to produce an analysis report.</dd></div>
+</dl></section>
+<section class="module" id="module-results"><h3><a href="../pyarchgraph/application/results.py"><code>results.py</code></a></h3><p>The report and its coverage, views, and registered findings.</p><dl class="class-list">
+<div class="class-entry" id="class-RegisteredFinding" data-class="pyarchgraph.application.results.RegisteredFinding"><dt><a href="../pyarchgraph/application/results.py"><code>RegisteredFinding</code></a></dt><dd>Connects a finding to the check that produced it and its severity.</dd></div>
+<div class="class-entry" id="class-ViewReport" data-class="pyarchgraph.application.results.ViewReport"><dt><a href="../pyarchgraph/application/results.py"><code>ViewReport</code></a></dt><dd>Presents the nodes, dependency counts and check findings for one graph view.</dd></div>
+<div class="class-entry" id="class-Coverage" data-class="pyarchgraph.application.results.Coverage"><dt><a href="../pyarchgraph/application/results.py"><code>Coverage</code></a></dt><dd>Describes the analysed scope, exclusions, diagnostics and limits of an analysis.</dd></div>
+<div class="class-entry" id="class-AnalysisReport" data-class="pyarchgraph.application.results.AnalysisReport"><dt><a href="../pyarchgraph/application/results.py"><code>AnalysisReport</code></a></dt><dd>Presents analysis coverage and findings for every graph view.</dd></div>
+</dl></section>
+<section class="module" id="module-exceptions"><h3><a href="../pyarchgraph/application/exceptions.py"><code>exceptions.py</code></a></h3><p>Failures at the analysis and extension boundaries.</p><dl class="class-list">
+<div class="class-entry" id="class-AnalysisError" data-class="pyarchgraph.application.exceptions.AnalysisError"><dt><a href="../pyarchgraph/application/exceptions.py"><code>AnalysisError</code></a></dt><dd>Invalid analysis configuration; source failures instead return a report.</dd></div>
+<div class="class-entry" id="class-ExtensionError" data-class="pyarchgraph.application.exceptions.ExtensionError"><dt><a href="../pyarchgraph/application/exceptions.py"><code>ExtensionError</code></a></dt><dd>A registered strategy raised or returned an invalid result.</dd></div>
+</dl></section>
+</section>
+<footer><span>PyArchGraph · Current package structure</span><span><a href="domain.html">Domain</a> · <a href="adapters.html">Adapters</a> · <a href="glossary.html">Glossary</a> · <a href="#main">Back to top ↑</a></span></footer>
+</main></div>
+</body>
+</html>

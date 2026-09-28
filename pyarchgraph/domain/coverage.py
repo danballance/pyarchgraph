@@ -4,6 +4,8 @@ from pyarchgraph.domain.models import Diagnostic, Severity, TargetBoundary
 
 
 class CoveragePolicy:
+    """Order diagnostics and decide whether the declared analysis scope is complete."""
+
     def diagnostics(
         self, diagnostics: tuple[Diagnostic, ...]
     ) -> tuple[Diagnostic, ...]:

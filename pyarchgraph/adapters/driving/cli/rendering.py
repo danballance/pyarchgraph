@@ -9,6 +9,8 @@ from pyarchgraph.application.results import AnalysisReport
 
 
 class JsonReportRenderer:
+    """Present an analysis report and any extension findings as JSON."""
+
     _SCALAR_TYPES = frozenset((str, int, float, bool, type(None)))
 
     def _value(self, value: object) -> object:

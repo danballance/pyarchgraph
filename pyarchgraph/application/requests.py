@@ -8,6 +8,8 @@ from pyarchgraph.domain.models import Details, TargetDeclaration
 
 @dataclass(frozen=True, slots=True)
 class AnalysisOptions:
+    """Selects the analysis scope, gate view and level of report detail."""
+
     excludes: tuple[str, ...] = ()
     gate: str = "structural"
     details: Details = "summary"
@@ -17,6 +19,8 @@ class AnalysisOptions:
 
 @dataclass(frozen=True, slots=True)
 class AnalysisRequest:
+    """Describes the source roots and options for one project analysis."""
+
     source_roots: tuple[Path, ...]
     options: AnalysisOptions = AnalysisOptions()
     base_dir: Path | None = None

@@ -30,12 +30,16 @@ from pyarchgraph.domain.validation import (
 
 @dataclass(frozen=True, slots=True)
 class ViewRegistration:
+    """Gives a graph view strategy the name used to select it and report its results."""
+
     id: str
     strategy: GraphViewStrategy
 
 
 @dataclass(frozen=True, slots=True)
 class CheckRegistration:
+    """Names a check strategy and identifies the graph views it can evaluate."""
+
     id: str
     strategy: CheckStrategy
     applicable_views: tuple[str, ...] | None = None
@@ -43,6 +47,8 @@ class CheckRegistration:
 
 @dataclass(frozen=True, slots=True)
 class StrategyRegistry:
+    """Defines the available graph views and checks, and which checks run for each view."""
+
     views: tuple[ViewRegistration, ...]
     checks: tuple[CheckRegistration, ...]
     check_selection: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
@@ -187,6 +193,8 @@ class StrategyRegistry:
 
 
 class StrategyEngine:
+    """Runs registered graph views and checks, validates their results and assembles view reports."""
+
     def __init__(
         self, registry: StrategyRegistry, graph_algorithms: GraphAlgorithms
     ) -> None:

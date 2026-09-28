@@ -13,6 +13,8 @@ from pyarchgraph.domain.models import (
 
 
 class TargetReconciler:
+    """Combine target declarations and check they fit the source package layout."""
+
     def reconcile(
         self,
         targets: tuple[TargetDeclaration, ...],

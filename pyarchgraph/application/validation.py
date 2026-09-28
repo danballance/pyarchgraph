@@ -8,6 +8,8 @@ from pyarchgraph.domain.models import TargetDeclaration
 
 
 class OptionValidator:
+    """Checks that analysis requests and options are valid before project access begins."""
+
     def __init__(
         self, gates: tuple[str, ...] = ("structural", "non-typing", "module-body")
     ) -> None:

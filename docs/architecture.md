@@ -5,6 +5,12 @@ Its domain describes source identities, explicit imports, resolution, graph view
 and findings. The application coordinates analysis. Adapters perform filesystem
 access, Python parsing, NetworkX operations and CLI presentation.
 
+For plain-language definitions, see the glossary in [Markdown](glossary.md) or
+[HTML](glossary.html). The standalone
+package guides explain how the pieces work together and list every class:
+[Domain](domain.html), [Application](application.html), and [Adapters](adapters.html).
+Open these HTML files directly in a browser; no build step or internet connection is needed.
+
 ## Runtime layout
 
 ```text

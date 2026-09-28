@@ -1,0 +1,103 @@
+---
+config:
+  theme: base
+  htmlLabels: false
+  fontFamily: system-ui, sans-serif
+  themeVariables:
+    fontSize: 14px
+    primaryTextColor: '#172b31'
+    lineColor: '#52656a'
+    edgeLabelBackground: '#ffffff'
+    clusterBkg: '#f5f7f6'
+    clusterBorder: '#dbe3e1'
+  flowchart:
+    htmlLabels: false
+    useMaxWidth: false
+    curve: linear
+    nodeSpacing: 35
+    rankSpacing: 30
+    padding: 14
+    subGraphTitleMargin:
+      top: 8
+      bottom: 16
+---
+flowchart TD
+    accTitle: Domain analysis from collected sources to the final report
+    accDescr: Collected source observations become a catalogue, resolved imports and a shared snapshot. Each registered view is built, validated and checked. A separate coverage path determines completeness. The application combines coverage and view results into the final report. View or check failures stop without a report.
+
+    %% Arrows show the main data flow, not every input or method call.
+    %% Request and root validation, followed by source collection, precede the shown observations.
+    %% Recoverable collection failures remain diagnostics alongside the available observations.
+    %% Coverage is decided after successful view evaluation; its separate path shows independent rules.
+
+    subgraph analysisFlow["Sources to view results"]
+        %% Adapter observations: SourceDiscovery and ImportFactSource.
+        collectedSources[/"Sources and import drafts"/]
+        %% Application: SourceCatalogBuilder aligns all roots before domain policies run.
+        combineRoots("Combine roots and paths")
+        %% Domain: BindingReconciler and FactCanonicalizer.
+        sourcePolicies["Reconcile bindings and assign fact IDs"]
+        %% Application: SourceCatalog returned by SourceCatalogBuilder.
+        catalogue("Source catalogue")
+        %% Domain: TargetReconciler combines discovered and configured declarations.
+        targetDeclarations["Reconcile targets"]
+        %% Domain: StaticImportResolver produces dependencies, other imports, diagnostics and boundaries.
+        resolvedImports["Resolve imports"]
+        %% Domain: ArchitectureDependencyPolicy removes redundant package-base evidence.
+        sourceDependencies["Select dependencies"]
+        %% Application: AnalyseProject assembles AnalysisSnapshot; StrategyEngine coordinates views.
+        sharedSnapshot("Build shared snapshot")
+        %% Domain: SnapshotNormalizer; GraphValidator prepares its shared evidence indexes here.
+        normalisedSnapshot["Normalise snapshot"]
+
+        subgraph registeredViews["Per view"]
+            direction TB
+            %% Domain: GraphViewStrategy and GraphValidator.
+            graphView["Build and validate view"]
+            %% Domain: CycleAnalyzer uses GraphAlgorithms to select cycles and their evidence.
+            cycleAnalysis["Explain cycles"]
+            %% Domain: CheckStrategy and CheckResultValidator; selection belongs to StrategyRegistry.
+            selectedChecks["Run and validate checks"]
+            %% Application: StrategyEngine assembles RegisteredFinding values and ViewReport.
+            viewReport("Assemble view report")
+            graphView --> cycleAnalysis --> selectedChecks --> viewReport
+            %% Cycle counts are computed even when no checks are selected.
+        end
+
+    end
+
+    %% Application: AnalyseProject gathers collection and resolution diagnostics, TargetReconciler
+    %% layout checks, LayoutDiagnosticService results and unused-acknowledgement warnings.
+    scopeDiagnostics("Gather coverage diagnostics")
+    %% Domain: CoveragePolicy orders diagnostics and checks completeness against encountered boundaries.
+    coverageDecision["Decide completeness"]
+    %% Application: AnalyseProject assembles Coverage and AnalysisReport.
+    finalReport("Assemble analysis report")
+    %% Application: StrategyEngine translates view/check execution or validation failures to ExtensionError.
+    extensionFailure("Extension failure: no report")
+
+    collectedSources --> combineRoots --> sourcePolicies --> catalogue
+    catalogue --> targetDeclarations
+    targetDeclarations --> resolvedImports
+    resolvedImports --> sourceDependencies --> sharedSnapshot
+    %% Sources, facts and other import outcomes carry forward into the shared snapshot.
+    sharedSnapshot --> normalisedSnapshot --> graphView
+    viewReport -->|"view reports"| finalReport
+
+    catalogue -->|"collection diagnostics"| scopeDiagnostics
+    resolvedImports -->|"diagnostics"| scopeDiagnostics
+    scopeDiagnostics --> coverageDecision
+    resolvedImports -->|"boundaries"| coverageDecision
+    coverageDecision -->|"coverage status"| finalReport
+
+    graphView -.->|"view failure"| extensionFailure
+    selectedChecks -.->|"check failure"| extensionFailure
+
+    classDef domain fill:#eaf5f1,stroke:#12685f,color:#172b31
+    classDef application fill:#fbf2e2,stroke:#805617,color:#172b31
+    classDef adapter fill:#f1edf8,stroke:#5a4d8b,color:#172b31
+    class sourcePolicies,targetDeclarations,resolvedImports,sourceDependencies,normalisedSnapshot,graphView,cycleAnalysis,selectedChecks,coverageDecision domain
+    class combineRoots,catalogue,sharedSnapshot,viewReport,scopeDiagnostics,finalReport,extensionFailure application
+    class collectedSources adapter
+
+    style analysisFlow fill:#ffffff,stroke:#dbe3e1

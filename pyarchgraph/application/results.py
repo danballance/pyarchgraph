@@ -18,6 +18,8 @@ from pyarchgraph.domain.models import (
 
 @dataclass(frozen=True, slots=True)
 class RegisteredFinding:
+    """Connects a finding to the check that produced it and its severity."""
+
     check_id: str
     severity: Severity
     finding: Finding
@@ -25,6 +27,8 @@ class RegisteredFinding:
 
 @dataclass(frozen=True, slots=True)
 class ViewReport:
+    """Presents the nodes, dependency counts and check findings for one graph view."""
+
     nodes: tuple[ViewNode, ...]
     enabled_check_ids: tuple[str, ...]
     dependency_count: int
@@ -35,6 +39,8 @@ class ViewReport:
 
 @dataclass(frozen=True, slots=True)
 class Coverage:
+    """Describes the analysed scope, exclusions, diagnostics and limits of an analysis."""
+
     roots: tuple[str, ...]
     excludes: tuple[str, ...]
     excluded_paths: tuple[ExcludedPath, ...]
@@ -49,7 +55,10 @@ class Coverage:
 
 @dataclass(frozen=True, slots=True)
 class AnalysisReport:
-    """Completion concerns the declared scope, including accepted boundaries."""
+    """Presents analysis coverage and findings for every graph view.
+
+    Completion concerns the declared scope, including accepted boundaries, not passing checks.
+    """
 
     status: Literal["complete", "incomplete"]
     gate: str

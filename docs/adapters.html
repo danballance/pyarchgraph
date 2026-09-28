@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="CLI input and output, filesystem observations, Python syntax, and NetworkX operations.">
+<title>Adapters · PyArchGraph package guide</title>
+<style>
+:root { color-scheme: light; --ink: #172b31; --muted: #52656a; --paper: #fff; --wash: #f5f7f6; --line: #dbe3e1; --accent: #12685f; --tint: #eaf5f1; }
+* { box-sizing: border-box; }
+html { scroll-padding-top: 1.5rem; }
+body { margin: 0; background: var(--wash); color: var(--ink); font: 16px/1.65 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+a { color: var(--accent); text-underline-offset: .2em; text-decoration-thickness: 1px; }
+a:hover { text-decoration-thickness: 2px; }
+a:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 2px; }
+code { font: .86em/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; }
+p { margin: .65rem 0 1rem; }
+strong { font-weight: 650; }
+h1, h2, h3 { line-height: 1.2; font-weight: 650; letter-spacing: -.035em; }
+h1 { font-size: clamp(2.8rem, 7vw, 4.8rem); margin: .3rem 0 1rem; }
+h2 { font-size: 1.8rem; margin: 0 0 1rem; }
+h3 { font-size: 1.15rem; margin: 0 0 .7rem; letter-spacing: -.015em; }
+.skip { position: absolute; left: 1rem; top: -6rem; padding: .5rem 1rem; background: white; z-index: 5; }
+.skip:focus { top: .5rem; }
+.topbar { background: var(--paper); border-bottom: 1px solid var(--line); }
+.topbar-inner { max-width: 1200px; margin: auto; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.brand { color: var(--ink); text-decoration: none; font-weight: 700; letter-spacing: -.02em; }
+.brand span { font-size: .8rem; font-weight: 450; color: var(--muted); margin-left: .7rem; }
+.package-nav { display: flex; gap: .4rem; flex-wrap: wrap; font-size: .88rem; }
+.package-nav a { padding: .35rem .75rem; border-radius: 5px; text-decoration: none; color: var(--muted); }
+.package-nav a[aria-current="page"] { color: var(--accent); background: var(--tint); font-weight: 650; }
+.package-nav a:hover { background: var(--wash); }
+.layout { max-width: 1200px; margin: auto; display: grid; grid-template-columns: 218px minmax(0, 1fr); gap: 3rem; padding: 2.5rem 2rem 4rem; align-items: start; }
+.sidebar { position: sticky; top: 1.5rem; font-size: .87rem; }
+.eyebrow { font-size: .72rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--accent); margin: 0 0 .8rem; }
+.sidebar ul { list-style: none; margin: 0; padding: 0; }
+.sidebar li { margin: .2rem 0; }
+.sidebar a { display: block; padding: .4rem 0; text-decoration: none; color: var(--muted); }
+.sidebar a:hover { color: var(--accent); text-decoration: underline; }
+.sidebar .related { border-top: 1px solid var(--line); margin-top: 1.2rem; padding-top: 1rem; }
+main { min-width: 0; }
+.hero { padding: .1rem 0 2.3rem; }
+.hero .lede { font-size: 1.23rem; line-height: 1.5; max-width: 38rem; margin: 0 0 1.2rem; }
+.meta { color: var(--muted); display: flex; flex-wrap: wrap; gap: .4rem 1rem; font-size: .8rem; }
+.meta span + span { border-left: 1px solid var(--line); padding-left: 1rem; }
+.content-section { border-top: 1px solid var(--line); padding-top: 2rem; margin-bottom: 2.5rem; scroll-margin-top: 1.5rem; }
+.intro { color: var(--muted); }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; margin: 1.5rem 0; }
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 1.1rem; }
+.card h3 { font-size: 1rem; }
+.card p { font-size: .88rem; margin: 0; color: var(--muted); }
+.example { margin: 1.5rem 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); }
+.example figcaption { padding: .6rem 1rem; background: var(--tint); color: var(--accent); font-size: .8rem; font-weight: 650; }
+.source-pair { display: grid; grid-template-columns: 1fr 1fr; }
+.source-pair pre { margin: 0; padding: 1rem; font-size: .91rem; overflow-x: auto; }
+.source-pair pre + pre { border-left: 1px solid var(--line); }
+.comment { color: var(--muted); }
+.note { padding: 1rem 1.2rem; background: var(--tint); border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; margin: 1.2rem 0; font-size: .94rem; }
+.note p { margin: 0; }
+.steps { list-style: none; counter-reset: step; padding: 0; margin: 1.3rem 0; }
+.steps > li { counter-increment: step; position: relative; padding: 0 0 1.1rem 3rem; }
+.steps > li::before { content: counter(step, decimal-leading-zero); position: absolute; top: 0; left: 0; color: var(--accent); font: 600 .83rem/1.8 ui-monospace, monospace; }
+.steps > li + li { padding-top: 1rem; border-top: 1px solid var(--line); }
+.steps > li + li::before { top: 1rem; }
+.steps h3 { margin: .1rem 0 .35rem; }
+.steps p { margin: 0; color: var(--muted); }
+.table-wrap { overflow-x: auto; margin: 1.2rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+caption { text-align: left; font-weight: 650; margin-bottom: .7rem; }
+th, td { padding: .8rem .9rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-size: .75rem; letter-spacing: .04em; background: var(--tint); }
+td:first-child { width: 30%; }
+.module-map td:first-child { width: 37%; }
+.module-links { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1.1rem 0 1.7rem; }
+.module-links a { padding: .35rem .6rem; background: var(--paper); border: 1px solid var(--line); border-radius: 5px; font-size: .77rem; text-decoration: none; }
+.module { margin: 0 0 1.7rem; padding: 1.1rem 1.25rem .25rem; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; scroll-margin-top: 1.5rem; }
+.module h3 { overflow-wrap: anywhere; margin: 0 0 .45rem; }
+.module > p { color: var(--muted); margin: 0 0 1rem; font-size: .86rem; }
+.class-list { margin: 0; }
+.class-entry { border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.2fr); gap: 1rem; padding: .85rem 0; scroll-margin-top: 1.5rem; }
+dt { font-weight: 600; min-width: 0; }
+dt a { text-decoration: none; }
+dt a:hover { text-decoration: underline; }
+dd { margin: 0; font-size: .88rem; line-height: 1.6; color: var(--muted); }
+.helper { display: block; font-size: .68rem; font-weight: 450; color: var(--muted); margin-top: .2rem; }
+footer { border-top: 1px solid var(--line); padding-top: 1.2rem; color: var(--muted); font-size: .8rem; display: flex; flex-wrap: wrap; justify-content: space-between; gap: .7rem; }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 165px minmax(0, 1fr); gap: 1.8rem; padding-left: 1.5rem; padding-right: 1.5rem; }
+  .cards { grid-template-columns: 1fr; }
+  .class-entry { grid-template-columns: 1fr; gap: .3rem; }
+}
+@media (max-width: 650px) {
+  .topbar-inner { padding: 1rem 1.1rem; gap: .7rem; }
+  .brand span { margin-left: .35rem; }
+  .package-nav { gap: 0; }
+  .package-nav a { padding: .3rem .6rem; }
+  .layout { display: block; padding: 1.4rem 1.1rem 2rem; }
+  .sidebar { position: static; margin: 0 0 1.7rem; padding: 0 0 1rem; border-bottom: 1px solid var(--line); }
+  .sidebar ul { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
+  .sidebar a { padding: .15rem 0; }
+  .sidebar .related { border: 0; padding: 0; margin-top: .55rem; }
+  .sidebar .eyebrow { margin-bottom: .4rem; }
+  .hero { padding-bottom: 1.6rem; }
+  h2 { font-size: 1.55rem; }
+  .hero .lede { font-size: 1.08rem; }
+  .source-pair { grid-template-columns: 1fr; }
+  .source-pair pre + pre { border-left: 0; border-top: 1px solid var(--line); }
+  th, td { padding: .6rem; }
+  td:first-child, .module-map td:first-child { width: 40%; }
+  .module { padding: 1rem 1rem .2rem; }
+}
+@media print {
+  body { background: white; color: black; font-size: 10pt; }
+  .topbar, .sidebar, .skip, .module-links { display: none; }
+  .layout { display: block; max-width: none; padding: 0; }
+  h1 { font-size: 32pt; }
+  h2 { font-size: 18pt; break-after: avoid; }
+  h3, dt { break-after: avoid; }
+  a { color: inherit; text-decoration: none; }
+  .hero { padding-bottom: 1rem; }
+  .content-section { padding-top: 1rem; margin-bottom: 1.3rem; }
+  .card, .class-entry, .note, .example, tr { break-inside: avoid; }
+  .module { border: 0; padding: 0; }
+  .class-entry { grid-template-columns: minmax(0, .9fr) minmax(0, 1.2fr); }
+  .table-wrap { overflow: visible; }
+  footer { margin-top: 1rem; }
+}
+
+:root { --accent: #5a4d8b; --tint: #f1edf8; }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar"><div class="topbar-inner">
+<a class="brand" href="../README.md">PyArchGraph <span>Package guides</span></a>
+<nav class="package-nav" aria-label="Package guides"><a href="domain.html">Domain</a>
+<a href="application.html">Application</a>
+<a href="adapters.html" aria-current="page">Adapters</a><a href="glossary.html">Glossary</a></nav>
+</div></header>
+<div class="layout">
+<aside class="sidebar"><p class="eyebrow">On this page</p><nav aria-label="On this page"><ul><li><a href="#role">Its role</a></li>
+<li><a href="#walkthrough">Follow a CLI run</a></li>
+<li><a href="#connections">How parts connect</a></li>
+<li><a href="#modules">Module map</a></li>
+<li><a href="#classes">Every class</a></li></ul></nav>
+<nav class="related" aria-label="Related documentation"><ul><li><a href="glossary.html">Terminology glossary ↗</a></li><li><a href="architecture.md">Architecture overview ↗</a></li></ul></nav></aside>
+<main id="main">
+<header class="hero"><p class="eyebrow">Package 03 / pyarchgraph.adapters</p><h1>Adapters</h1>
+<p class="lede">Connects analysis to the command line, files, Python parsing, and graph-library operations.</p><div class="meta"><span>7 modules</span><span>18 classes</span><span>Walkthrough + class index</span></div></header>
+<section class="content-section" id="role">
+<h2>Its role</h2>
+
+<p>An <a href="glossary.html#adapter">adapter</a> connects a core contract to an interface or technology. A <strong>driving</strong> adapter starts the workflow; a <strong>driven</strong> adapter provides a capability the core asks for.</p>
+<div class="cards">
+<div class="card"><h3>Start and present</h3><p>The CLI turns command-line choices into a request and presents the report.</p></div>
+<div class="card"><h3>Observe source</h3><p>Filesystem and Python parsing components provide source and import observations.</p></div>
+<div class="card"><h3>Query graphs</h3><p>The NetworkX component supplies graph operations through domain contracts.</p></div>
+</div>
+<p>The CLI, filesystem, Python AST, and NetworkX components remain independent. Helpers inside one component may work together. <code>main.ApplicationFactory</code>, outside these packages, connects the concrete parts.</p>
+</section>
+<section class="content-section" id="walkthrough">
+<h2>Follow a CLI run</h2>
+
+<p>Run <code>pyarchgraph demo</code> from the parent of this example directory.</p>
+<figure class="example">
+<figcaption>The same two-file example in all three guides</figcaption>
+<div class="source-pair"><pre><code><span class="comment"># demo/orders.py</span>
+import inventory</code></pre><pre><code><span class="comment"># demo/inventory.py</span>
+import orders</code></pre></div>
+</figure>
+<ol class="steps">
+<li><h3>Turn CLI choices into a request</h3><p><code>CliApplication</code> reads roots, exclusions, gate, detail level, and an optional config path. <code>TomlOptionsReader</code> translates an explicitly selected TOML file and CLI choices into <code>AnalysisOptions</code>. The CLI calls the <code>ProjectAnalyzer</code> port.</p></li>
+<li><h3>Discover the files</h3><p>When the application requests it, <code>FileSystemProjectAccess</code> locates roots and supplies packaging clues. <code>FileSystemSourceDiscovery</code> inventories sources, exclusions, bindings, and target declarations. It recognises ordinary package/module precedence within a root.</p></li>
+<li><h3>Read imports without running the project</h3><p><code>AstImportFactSource</code> coordinates <code>SourceReader</code>, <code>PythonAstParser</code>, and <code>ModuleImportExtractor</code>. The two statements become two <code>ImportFactDraft</code> values, with locations and context. The application later assigns final fact identities.</p></li>
+<li><h3>Supply the graph operations</h3><p>During view analysis, <code>NetworkXGraphAlgorithms</code> prepares graphs and returns <code>NetworkXGraphHandle</code> objects. These find groups whose nodes can all reach one another and a witness cycle when asked. Domain code decides what that cycle means and which evidence supports it.</p></li>
+<li><h3>Present the result</h3><p><code>JsonReportRenderer</code> turns the returned report into JSON for standard output. <code>CliExitCodePolicy</code> sees complete coverage and a gate error finding, so this example exits with <code>1</code>.</p></li>
+</ol>
+<div class="note"><p>Collection reports source read and parse failures as diagnostics, allowing a partial report. Invocation or extension failures are printed to standard error and return exit code 2 without a JSON report.</p></div>
+</section>
+<section class="content-section" id="connections">
+<h2>How parts connect</h2>
+
+<div class="table-wrap"><table><caption>Core contracts and concrete adapters</caption><thead><tr><th scope="col">Contract</th><th scope="col">Adapter relationship</th></tr></thead><tbody>
+<tr><td><code>ProjectAnalyzer</code></td><td>The CLI calls this application input port; <code>AnalyseProject</code> implements it.</td></tr>
+<tr><td><code>ProjectAccess</code></td><td><code>FileSystemProjectAccess</code> supplies locations and metadata observations.</td></tr>
+<tr><td><code>SourceDiscovery</code></td><td><code>FileSystemSourceDiscovery</code> supplies an inventory for a root.</td></tr>
+<tr><td><code>ImportFactSource</code></td><td><code>AstImportFactSource</code> supplies import drafts and collection diagnostics.</td></tr>
+<tr><td><code>GraphAlgorithms</code> / <code>GraphHandle</code></td><td>The NetworkX classes supply the domain's graph operations.</td></tr>
+</tbody></table></div>
+<p>The AST component also defines small local contracts—<code>SourceTextReader</code>, <code>AstParser</code>, and <code>ImportExtractor</code>—for its own collaborators. Syntax-tree details stay inside that component.</p>
+<p>The <a href="glossary.html#composition-root">composition root</a>, <a href="../pyarchgraph/main.py"><code>ApplicationFactory</code></a>, chooses defaults or accepts supplied collaborators, then builds an analyser or CLI. The small <a href="../pyarchgraph/__main__.py"><code>__main__.main</code></a> entry point starts the CLI.</p>
+<div class="table-wrap"><table><caption>CLI outcomes</caption><thead><tr><th scope="col">Exit code</th><th scope="col">Meaning</th></tr></thead><tbody>
+<tr><td><code>0</code></td><td>Complete analysis; no error findings in the gate.</td></tr>
+<tr><td><code>1</code></td><td>Complete analysis; the gate has error findings.</td></tr>
+<tr><td><code>2</code></td><td>Incomplete analysis, invalid invocation, or extension failure.</td></tr>
+</tbody></table></div>
+<p>Configuration is read only when selected with <code>--config</code>. Packaging metadata is inspected as data, and analysed source is parsed without execution. The tool does not discover runtime dependencies by importing the project.</p>
+</section>
+<section class="content-section" id="modules">
+<h2>Module map</h2>
+<p class="intro">Choose a module to jump to its classes below. Package initialisers are intentionally empty; callers import from the defining modules.</p><div class="table-wrap"><table class="module-map"><caption>Where each responsibility lives</caption><thead><tr><th scope="col">Module</th><th scope="col">Responsibility</th></tr></thead><tbody>
+<tr><td><a href="#module-driving-cli-application"><code>driving/cli/application.py</code></a></td><td>Command-line arguments, analysis invocation, and exit-code policy.</td></tr>
+<tr><td><a href="#module-driving-cli-configuration"><code>driving/cli/configuration.py</code></a></td><td>Explicit TOML configuration translated into analysis options.</td></tr>
+<tr><td><a href="#module-driving-cli-rendering"><code>driving/cli/rendering.py</code></a></td><td>Analysis reports presented as JSON.</td></tr>
+<tr><td><a href="#module-driven-filesystem-project"><code>driven/filesystem/project.py</code></a></td><td>Real project locations and literal packaging metadata.</td></tr>
+<tr><td><a href="#module-driven-filesystem-discovery"><code>driven/filesystem/discovery.py</code></a></td><td>Source inventory, exclusions, bindings, and target declarations.</td></tr>
+<tr><td><a href="#module-driven-python_ast"><code>driven/python_ast.py</code></a></td><td>Source reading and parsing into import fact drafts.</td></tr>
+<tr><td><a href="#module-driven-networkx_graph"><code>driven/networkx_graph.py</code></a></td><td>NetworkX implementations of the domain graph contracts.</td></tr>
+</tbody></table></div>
+</section>
+<section class="content-section" id="classes">
+<h2>Every class</h2>
+<p class="intro">All 18 classes in this package, including services, contracts, an exception, and internal helpers. Names link to the source file; descriptions match the role summaries in the code.</p>
+<nav class="module-links" aria-label="Class index by module"><a href="#module-driving-cli-application"><code>driving/cli/application.py</code></a>
+<a href="#module-driving-cli-configuration"><code>driving/cli/configuration.py</code></a>
+<a href="#module-driving-cli-rendering"><code>driving/cli/rendering.py</code></a>
+<a href="#module-driven-filesystem-project"><code>driven/filesystem/project.py</code></a>
+<a href="#module-driven-filesystem-discovery"><code>driven/filesystem/discovery.py</code></a>
+<a href="#module-driven-python_ast"><code>driven/python_ast.py</code></a>
+<a href="#module-driven-networkx_graph"><code>driven/networkx_graph.py</code></a></nav>
+<section class="module" id="module-driving-cli-application"><h3><a href="../pyarchgraph/adapters/driving/cli/application.py"><code>driving/cli/application.py</code></a></h3><p>Command-line arguments, analysis invocation, and exit-code policy.</p><dl class="class-list">
+<div class="class-entry" id="class-CliExitCodePolicy" data-class="pyarchgraph.adapters.driving.cli.application.CliExitCodePolicy"><dt><a href="../pyarchgraph/adapters/driving/cli/application.py"><code>CliExitCodePolicy</code></a></dt><dd>Translate analysis completeness and gate findings into a CLI exit code.</dd></div>
+<div class="class-entry" id="class-CliApplication" data-class="pyarchgraph.adapters.driving.cli.application.CliApplication"><dt><a href="../pyarchgraph/adapters/driving/cli/application.py"><code>CliApplication</code></a></dt><dd>Run analysis from command-line choices and present the resulting report.</dd></div>
+</dl></section>
+<section class="module" id="module-driving-cli-configuration"><h3><a href="../pyarchgraph/adapters/driving/cli/configuration.py"><code>driving/cli/configuration.py</code></a></h3><p>Explicit TOML configuration translated into analysis options.</p><dl class="class-list">
+<div class="class-entry" id="class-TomlOptionsReader" data-class="pyarchgraph.adapters.driving.cli.configuration.TomlOptionsReader"><dt><a href="../pyarchgraph/adapters/driving/cli/configuration.py"><code>TomlOptionsReader</code></a></dt><dd>Combine CLI choices and explicit TOML configuration into analysis options.</dd></div>
+</dl></section>
+<section class="module" id="module-driving-cli-rendering"><h3><a href="../pyarchgraph/adapters/driving/cli/rendering.py"><code>driving/cli/rendering.py</code></a></h3><p>Analysis reports presented as JSON.</p><dl class="class-list">
+<div class="class-entry" id="class-JsonReportRenderer" data-class="pyarchgraph.adapters.driving.cli.rendering.JsonReportRenderer"><dt><a href="../pyarchgraph/adapters/driving/cli/rendering.py"><code>JsonReportRenderer</code></a></dt><dd>Present an analysis report and any extension findings as JSON.</dd></div>
+</dl></section>
+<section class="module" id="module-driven-filesystem-project"><h3><a href="../pyarchgraph/adapters/driven/filesystem/project.py"><code>driven/filesystem/project.py</code></a></h3><p>Real project locations and literal packaging metadata.</p><dl class="class-list">
+<div class="class-entry" id="class-FileSystemProjectAccess" data-class="pyarchgraph.adapters.driven.filesystem.project.FileSystemProjectAccess"><dt><a href="../pyarchgraph/adapters/driven/filesystem/project.py"><code>FileSystemProjectAccess</code></a></dt><dd>Locate source roots and read packaging metadata for analysis.</dd></div>
+</dl></section>
+<section class="module" id="module-driven-filesystem-discovery"><h3><a href="../pyarchgraph/adapters/driven/filesystem/discovery.py"><code>driven/filesystem/discovery.py</code></a></h3><p>Source inventory, exclusions, bindings, and target declarations.</p><dl class="class-list">
+<div class="class-entry" id="class-FileSystemSourceDiscovery" data-class="pyarchgraph.adapters.driven.filesystem.discovery.FileSystemSourceDiscovery"><dt><a href="../pyarchgraph/adapters/driven/filesystem/discovery.py"><code>FileSystemSourceDiscovery</code></a></dt><dd>Inventory source modules, import bindings and target declarations on disk.</dd></div>
+<div class="class-entry" id="class-_DiscoverySession" data-class="pyarchgraph.adapters.driven.filesystem.discovery._DiscoverySession"><dt><a href="../pyarchgraph/adapters/driven/filesystem/discovery.py"><code>_DiscoverySession</code></a><span class="helper">Internal helper</span></dt><dd>Gather files, target declarations and diagnostics for one filesystem scan.</dd></div>
+</dl></section>
+<section class="module" id="module-driven-python_ast"><h3><a href="../pyarchgraph/adapters/driven/python_ast.py"><code>driven/python_ast.py</code></a></h3><p>Source reading and parsing into import fact drafts.</p><dl class="class-list">
+<div class="class-entry" id="class-SourceTextReader" data-class="pyarchgraph.adapters.driven.python_ast.SourceTextReader"><dt><a href="../pyarchgraph/adapters/driven/python_ast.py"><code>SourceTextReader</code></a></dt><dd>Provide Python source text for import collection.</dd></div>
+<div class="class-entry" id="class-AstParser" data-class="pyarchgraph.adapters.driven.python_ast.AstParser"><dt><a href="../pyarchgraph/adapters/driven/python_ast.py"><code>AstParser</code></a></dt><dd>Provide the syntax tree used to collect imports from Python source.</dd></div>
+<div class="class-entry" id="class-ImportExtractor" data-class="pyarchgraph.adapters.driven.python_ast.ImportExtractor"><dt><a href="../pyarchgraph/adapters/driven/python_ast.py"><code>ImportExtractor</code></a></dt><dd>Describe explicit imports and their context as import fact drafts.</dd></div>
+<div class="class-entry" id="class-NonRegularSourceError" data-class="pyarchgraph.adapters.driven.python_ast.NonRegularSourceError"><dt><a href="../pyarchgraph/adapters/driven/python_ast.py"><code>NonRegularSourceError</code></a></dt><dd>Signal that an input cannot be read as a regular source file.</dd></div>
+<div class="class-entry" id="class-SourceReader" data-class="pyarchgraph.adapters.driven.python_ast.SourceReader"><dt><a href="../pyarchgraph/adapters/driven/python_ast.py"><code>SourceReader</code></a></dt><dd>Read Python source text, following only symlinks to regular files.</dd></div>
+<div class="class-entry" id="class-PythonAstParser" data-class="pyarchgraph.adapters.driven.python_ast.PythonAstParser"><dt><a href="../pyarchgraph/adapters/driven/python_ast.py"><code>PythonAstParser</code></a></dt><dd>Expose Python syntax for import collection without executing the source.</dd></div>
+<div class="class-entry" id="class-_SourceText" data-class="pyarchgraph.adapters.driven.python_ast._SourceText"><dt><a href="../pyarchgraph/adapters/driven/python_ast.py"><code>_SourceText</code></a><span class="helper">Internal helper</span></dt><dd>Recover source excerpts and character columns for import fact drafts.</dd></div>
+<div class="class-entry" id="class-ModuleImportExtractor" data-class="pyarchgraph.adapters.driven.python_ast.ModuleImportExtractor"><dt><a href="../pyarchgraph/adapters/driven/python_ast.py"><code>ModuleImportExtractor</code></a></dt><dd>Describe each explicit import and its context as an import fact draft.</dd></div>
+<div class="class-entry" id="class-AstImportFactSource" data-class="pyarchgraph.adapters.driven.python_ast.AstImportFactSource"><dt><a href="../pyarchgraph/adapters/driven/python_ast.py"><code>AstImportFactSource</code></a></dt><dd>Collect import fact drafts and source diagnostics without executing code.</dd></div>
+</dl></section>
+<section class="module" id="module-driven-networkx_graph"><h3><a href="../pyarchgraph/adapters/driven/networkx_graph.py"><code>driven/networkx_graph.py</code></a></h3><p>NetworkX implementations of the domain graph contracts.</p><dl class="class-list">
+<div class="class-entry" id="class-NetworkXGraphHandle" data-class="pyarchgraph.adapters.driven.networkx_graph.NetworkXGraphHandle"><dt><a href="../pyarchgraph/adapters/driven/networkx_graph.py"><code>NetworkXGraphHandle</code></a></dt><dd>Answer cycle queries for one prepared dependency graph using NetworkX.</dd></div>
+<div class="class-entry" id="class-NetworkXGraphAlgorithms" data-class="pyarchgraph.adapters.driven.networkx_graph.NetworkXGraphAlgorithms"><dt><a href="../pyarchgraph/adapters/driven/networkx_graph.py"><code>NetworkXGraphAlgorithms</code></a></dt><dd>Prepare dependency graphs for cycle checks using NetworkX.</dd></div>
+</dl></section>
+</section>
+<footer><span>PyArchGraph · Current package structure</span><span><a href="domain.html">Domain</a> · <a href="application.html">Application</a> · <a href="glossary.html">Glossary</a> · <a href="#main">Back to top ↑</a></span></footer>
+</main></div>
+</body>
+</html>

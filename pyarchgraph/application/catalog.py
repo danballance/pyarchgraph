@@ -26,6 +26,8 @@ TEST_EXCLUDES = ("tests", "test_*.py", "*_test.py")
 
 @dataclass(frozen=True, slots=True)
 class SourceCatalog:
+    """Brings together sources, import facts and coverage observations from all roots."""
+
     roots: tuple[Path, ...]
     modules: tuple[SourceModule, ...]
     facts: tuple[ImportFact, ...]
@@ -37,6 +39,8 @@ class SourceCatalog:
 
 
 class SourceCatalogBuilder:
+    """Assembles one source catalogue and gives collected import drafts stable identities."""
+
     def __init__(
         self,
         discovery: SourceDiscovery,

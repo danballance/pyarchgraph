@@ -17,7 +17,10 @@ from pyarchgraph.domain.targets import TargetReconciler
 
 
 class AnalyseProject(ProjectAnalyzer):
-    """Reusable configuration; all mutable observations are local to an analysis."""
+    """Coordinates source collection, import resolution and checks to produce an analysis report.
+
+    Each run keeps its observations separate so the configured analyser can be reused.
+    """
 
     def __init__(
         self,

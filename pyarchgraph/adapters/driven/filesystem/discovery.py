@@ -29,7 +29,10 @@ DEFAULT_EXCLUDED_DIRECTORY_BASENAMES = frozenset(
 
 
 class FileSystemSourceDiscovery(SourceDiscovery):
-    """Inventory files and bindings without importing target code."""
+    """Inventory source modules, import bindings and target declarations on disk.
+
+    Project code is never imported or executed.
+    """
 
     def discover(
         self,
@@ -279,7 +282,7 @@ class FileSystemSourceDiscovery(SourceDiscovery):
 
 
 class _DiscoverySession:
-    """Confine filesystem traversal results to a single discovery operation."""
+    """Gather files, target declarations and diagnostics for one filesystem scan."""
 
     def __init__(
         self,

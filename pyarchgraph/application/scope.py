@@ -5,6 +5,8 @@ from pyarchgraph.domain.models import Diagnostic, ExternalImport, Severity, Sour
 
 
 class LayoutDiagnosticService:
+    """Reports evidence that the selected import roots do not match the project layout."""
+
     def __init__(self, project_access: ProjectAccess) -> None:
         self.project_access = project_access
 

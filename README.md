@@ -196,6 +196,12 @@ before the coordinated release.
 
 ## Extending analysis
 
+Start with the terminology glossary ([Markdown](docs/glossary.md) or
+[HTML](docs/glossary.html)) and the package guides:
+[Domain](docs/domain.html), [Application](docs/application.html), and
+[Adapters](docs/adapters.html). Each guide has a short walkthrough and a complete
+class index. Open the HTML files in a browser; they work offline without a build step.
+
 Runtime code follows ports and adapters: immutable models, resolution policies,
 and graph strategy contracts live in `domain`; use cases, request/result values,
 ports and immutable registries live in `application`; CLI, TOML and JSON live in

@@ -47,10 +47,9 @@ from pyarchgraph.domain.targets import TargetReconciler
 
 
 class ApplicationFactory:
-    """Explicit registrations replace defaults; omitted registrations use built-ins.
+    """Connect built-in or supplied services and adapters into an analyser or CLI.
 
-    An injected registry is used unchanged. The optional outgoing ports permit
-    alternative source stores, import resolvers, and graph libraries.
+    Explicit registrations replace built-ins; an injected registry is used unchanged.
     """
 
     def __init__(

@@ -9,6 +9,8 @@ from pyarchgraph.domain.models import TargetDeclaration
 
 
 class TomlOptionsReader:
+    """Combine CLI choices and explicit TOML configuration into analysis options."""
+
     def load(
         self,
         config_path: Path | None,

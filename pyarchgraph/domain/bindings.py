@@ -8,6 +8,8 @@ from pyarchgraph.domain.models import Diagnostic, Severity, SourceModule
 
 
 class BindingReconciler:
+    """Mark conflicting import bindings across selected source roots."""
+
     def reconcile(
         self,
         modules: tuple[SourceModule, ...],

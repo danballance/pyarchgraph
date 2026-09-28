@@ -15,7 +15,10 @@ from pyarchgraph.application.ports.project import (
 
 
 class FileSystemProjectAccess(ProjectAccess):
-    """Capture one base directory and keep all physical path operations outside core."""
+    """Locate source roots and read packaging metadata for analysis.
+
+    Metadata is read without running project build code.
+    """
 
     def locate(
         self, source_roots: tuple[Path, ...], base_dir: Path | None = None

@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Plain-language definitions of PyArchGraph sources, import facts, resolution, views, findings, coverage, and architecture.">
+<title>Glossary · PyArchGraph</title>
+<style>
+:root { color-scheme: light; --ink: #172b31; --muted: #52656a; --paper: #fff; --wash: #f5f7f6; --line: #dbe3e1; --accent: #12685f; --tint: #eaf5f1; }
+* { box-sizing: border-box; }
+html { scroll-padding-top: 1.5rem; }
+body { margin: 0; background: var(--wash); color: var(--ink); font: 16px/1.65 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+a { color: var(--accent); text-underline-offset: .2em; text-decoration-thickness: 1px; }
+a:hover { text-decoration-thickness: 2px; }
+a:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 2px; }
+code { font: .86em/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; }
+p { margin: .65rem 0 1rem; }
+strong { font-weight: 650; }
+h1, h2, h3 { line-height: 1.2; font-weight: 650; letter-spacing: -.035em; }
+h1 { font-size: clamp(2.8rem, 7vw, 4.8rem); margin: .3rem 0 1rem; }
+h2 { font-size: 1.8rem; margin: 0 0 1rem; }
+h3 { font-size: 1.15rem; margin: 0 0 .7rem; letter-spacing: -.015em; }
+.skip { position: absolute; left: 1rem; top: -6rem; padding: .5rem 1rem; background: white; z-index: 5; }
+.skip:focus { top: .5rem; }
+.topbar { background: var(--paper); border-bottom: 1px solid var(--line); }
+.topbar-inner { max-width: 1200px; margin: auto; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.brand { color: var(--ink); text-decoration: none; font-weight: 700; letter-spacing: -.02em; }
+.brand span { font-size: .8rem; font-weight: 450; color: var(--muted); margin-left: .7rem; }
+.package-nav { display: flex; gap: .4rem; flex-wrap: wrap; font-size: .88rem; }
+.package-nav a { padding: .35rem .75rem; border-radius: 5px; text-decoration: none; color: var(--muted); }
+.package-nav a[aria-current="page"] { color: var(--accent); background: var(--tint); font-weight: 650; }
+.package-nav a:hover { background: var(--wash); }
+.layout { max-width: 1200px; margin: auto; display: grid; grid-template-columns: 218px minmax(0, 1fr); gap: 3rem; padding: 2.5rem 2rem 4rem; align-items: start; }
+.sidebar { position: sticky; top: 1.5rem; font-size: .87rem; }
+.eyebrow { font-size: .72rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--accent); margin: 0 0 .8rem; }
+.sidebar ul { list-style: none; margin: 0; padding: 0; }
+.sidebar li { margin: .2rem 0; }
+.sidebar a { display: block; padding: .4rem 0; text-decoration: none; color: var(--muted); }
+.sidebar a:hover { color: var(--accent); text-decoration: underline; }
+.sidebar .related { border-top: 1px solid var(--line); margin-top: 1.2rem; padding-top: 1rem; }
+main { min-width: 0; }
+.hero { padding: .1rem 0 2.3rem; }
+.hero .lede { font-size: 1.23rem; line-height: 1.5; max-width: 38rem; margin: 0 0 1.2rem; }
+.meta { color: var(--muted); display: flex; flex-wrap: wrap; gap: .4rem 1rem; font-size: .8rem; }
+.meta span + span { border-left: 1px solid var(--line); padding-left: 1rem; }
+.content-section { border-top: 1px solid var(--line); padding-top: 2rem; margin-bottom: 2.5rem; scroll-margin-top: 1.5rem; }
+.intro { color: var(--muted); }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; margin: 1.5rem 0; }
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 1.1rem; }
+.card h3 { font-size: 1rem; }
+.card p { font-size: .88rem; margin: 0; color: var(--muted); }
+.example { margin: 1.5rem 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); }
+.example figcaption { padding: .6rem 1rem; background: var(--tint); color: var(--accent); font-size: .8rem; font-weight: 650; }
+.source-pair { display: grid; grid-template-columns: 1fr 1fr; }
+.source-pair pre { margin: 0; padding: 1rem; font-size: .91rem; overflow-x: auto; }
+.source-pair pre + pre { border-left: 1px solid var(--line); }
+.comment { color: var(--muted); }
+.note { padding: 1rem 1.2rem; background: var(--tint); border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; margin: 1.2rem 0; font-size: .94rem; }
+.note p { margin: 0; }
+.steps { list-style: none; counter-reset: step; padding: 0; margin: 1.3rem 0; }
+.steps > li { counter-increment: step; position: relative; padding: 0 0 1.1rem 3rem; }
+.steps > li::before { content: counter(step, decimal-leading-zero); position: absolute; top: 0; left: 0; color: var(--accent); font: 600 .83rem/1.8 ui-monospace, monospace; }
+.steps > li + li { padding-top: 1rem; border-top: 1px solid var(--line); }
+.steps > li + li::before { top: 1rem; }
+.steps h3 { margin: .1rem 0 .35rem; }
+.steps p { margin: 0; color: var(--muted); }
+.table-wrap { overflow-x: auto; margin: 1.2rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+caption { text-align: left; font-weight: 650; margin-bottom: .7rem; }
+th, td { padding: .8rem .9rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-size: .75rem; letter-spacing: .04em; background: var(--tint); }
+td:first-child { width: 30%; }
+.module-map td:first-child { width: 37%; }
+.module-links { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1.1rem 0 1.7rem; }
+.module-links a { padding: .35rem .6rem; background: var(--paper); border: 1px solid var(--line); border-radius: 5px; font-size: .77rem; text-decoration: none; }
+.module { margin: 0 0 1.7rem; padding: 1.1rem 1.25rem .25rem; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; scroll-margin-top: 1.5rem; }
+.module h3 { overflow-wrap: anywhere; margin: 0 0 .45rem; }
+.module > p { color: var(--muted); margin: 0 0 1rem; font-size: .86rem; }
+.class-list { margin: 0; }
+.class-entry { border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.2fr); gap: 1rem; padding: .85rem 0; scroll-margin-top: 1.5rem; }
+dt { font-weight: 600; min-width: 0; }
+dt a { text-decoration: none; }
+dt a:hover { text-decoration: underline; }
+dd { margin: 0; font-size: .88rem; line-height: 1.6; color: var(--muted); }
+.helper { display: block; font-size: .68rem; font-weight: 450; color: var(--muted); margin-top: .2rem; }
+footer { border-top: 1px solid var(--line); padding-top: 1.2rem; color: var(--muted); font-size: .8rem; display: flex; flex-wrap: wrap; justify-content: space-between; gap: .7rem; }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 165px minmax(0, 1fr); gap: 1.8rem; padding-left: 1.5rem; padding-right: 1.5rem; }
+  .cards { grid-template-columns: 1fr; }
+  .class-entry { grid-template-columns: 1fr; gap: .3rem; }
+}
+@media (max-width: 650px) {
+  .topbar-inner { padding: 1rem 1.1rem; gap: .7rem; }
+  .brand span { margin-left: .35rem; }
+  .package-nav { gap: 0; }
+  .package-nav a { padding: .3rem .6rem; }
+  .layout { display: block; padding: 1.4rem 1.1rem 2rem; }
+  .sidebar { position: static; margin: 0 0 1.7rem; padding: 0 0 1rem; border-bottom: 1px solid var(--line); }
+  .sidebar ul { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
+  .sidebar a { padding: .15rem 0; }
+  .sidebar .related { border: 0; padding: 0; margin-top: .55rem; }
+  .sidebar .eyebrow { margin-bottom: .4rem; }
+  .hero { padding-bottom: 1.6rem; }
+  h2 { font-size: 1.55rem; }
+  .hero .lede { font-size: 1.08rem; }
+  .source-pair { grid-template-columns: 1fr; }
+  .source-pair pre + pre { border-left: 0; border-top: 1px solid var(--line); }
+  th, td { padding: .6rem; }
+  td:first-child, .module-map td:first-child { width: 40%; }
+  .module { padding: 1rem 1rem .2rem; }
+}
+@media print {
+  body { background: white; color: black; font-size: 10pt; }
+  .topbar, .sidebar, .skip, .module-links { display: none; }
+  .layout { display: block; max-width: none; padding: 0; }
+  h1 { font-size: 32pt; }
+  h2 { font-size: 18pt; break-after: avoid; }
+  h3, dt { break-after: avoid; }
+  a { color: inherit; text-decoration: none; }
+  .hero { padding-bottom: 1rem; }
+  .content-section { padding-top: 1rem; margin-bottom: 1.3rem; }
+  .card, .class-entry, .note, .example, tr { break-inside: avoid; }
+  .module { border: 0; padding: 0; }
+  .class-entry { grid-template-columns: minmax(0, .9fr) minmax(0, 1.2fr); }
+  .table-wrap { overflow: visible; }
+  footer { margin-top: 1rem; }
+}
+
+:root { --accent: #12685f; --tint: #eaf5f1; }
+
+:root { --accent: #315c89; --tint: #eaf1f9; }
+.glossary-term { padding: 1.2rem 1.25rem; margin: .8rem 0; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); scroll-margin-top: 1.5rem; }
+.glossary-term h3 { margin-bottom: .6rem; }
+.glossary-term h3 a { color: var(--ink); text-decoration: none; }
+.glossary-term h3 a:hover { color: var(--accent); text-decoration: underline; }
+.glossary-term p { margin: 0; }
+.glossary-term p + p { margin-top: .7rem; }
+@media (max-width: 650px) { .glossary-term { padding: 1rem; } }
+@media print { .glossary-term { break-inside: avoid; border: 0; border-top: 1px solid var(--line); padding: .7rem 0; margin: 0; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar"><div class="topbar-inner">
+<a class="brand" href="../README.md">PyArchGraph <span>Package guides</span></a>
+<nav class="package-nav" aria-label="Package guides"><a href="domain.html">Domain</a>
+<a href="application.html">Application</a>
+<a href="adapters.html">Adapters</a><a href="glossary.html" aria-current="page">Glossary</a></nav>
+</div></header>
+<div class="layout">
+<aside class="sidebar"><p class="eyebrow">On this page</p><nav aria-label="On this page"><ul><li><a href="#source-scope-and-identity">Source scope and identity</a></li><li><a href="#import-observations-and-resolution">Import observations and resolution</a></li><li><a href="#views-and-checks">Views and checks</a></li><li><a href="#workflow-and-reports">Workflow and reports</a></li><li><a href="#architecture-vocabulary">Architecture vocabulary</a></li></ul></nav>
+<nav class="related" aria-label="Related documentation"><ul><li><a href="glossary.md">Markdown version ↗</a></li><li><a href="architecture.md">Architecture overview ↗</a></li></ul></nav></aside>
+<main id="main">
+<header class="hero"><p class="eyebrow">PyArchGraph / shared terminology</p><h1>Glossary</h1>
+<p class="lede">A shared vocabulary for understanding PyArchGraph.</p>
+<p>The terms used in the code and package guides, with their corresponding code names. Prose uses <strong>catalogue</strong>; Python identifiers retain <strong>Catalog</strong>.</p>
+<div class="meta"><span>65 terms</span><span>5 groups</span><span>Plain-language definitions</span></div></header>
+<!-- Definitions mirror glossary.md; update both views together. -->
+<section class="content-section" id="source-scope-and-identity">
+<h2>Source scope and identity</h2>
+<article class="glossary-term" id="source-scope">
+<h3><a href="#source-scope">Source scope</a></h3>
+<p>The files selected for analysis by source roots and exclusions. This is distinct
+from an import's <strong>context</strong>, which describes where a statement appears inside a file.</p>
+</article>
+<article class="glossary-term" id="source-root">
+<h3><a href="#source-root">Source root</a></h3>
+<p>A directory from which dotted import names are interpreted, like a directory on
+Python's <code>sys.path</code>. Several roots can be analysed together. Root order does not
+decide which conflicting module wins; a nested root owns its own files.</p>
+</article>
+<article class="glossary-term" id="base-directory">
+<h3><a href="#base-directory">Base directory</a></h3>
+<p>The reference directory for relative roots and paths in the report. It makes
+locations from different source roots comparable. Set through <code>AnalysisRequest.base_dir</code>.</p>
+</article>
+<article class="glossary-term" id="source-module">
+<h3><a href="#source-module">Source module</a></h3>
+<p>One inventoried Python source file, including package initialisers and files
+without usable dotted import names. <code>SourceModule</code> records its identity, path,
+binding status, and analysis status.</p>
+</article>
+<article class="glossary-term" id="source-id">
+<h3><a href="#source-id">Source ID</a></h3>
+<p>The identity of a source file in the analysis: <code>source:</code> followed by its path
+relative to the base directory, such as <code>source:src/orders.py</code>. It identifies a
+file, independently of the name used to import it.</p>
+</article>
+<article class="glossary-term" id="import-name">
+<h3><a href="#import-name">Import name</a></h3>
+<p>A dotted name such as <code>shop.orders</code> used to refer to a module or package. A source
+file may have an import name, or may be analysed by path alone.</p>
+</article>
+<article class="glossary-term" id="package-and-namespace">
+<h3><a href="#package-and-namespace">Package and namespace</a></h3>
+<p>A regular package has an <code>__init__.py</code> source file. A namespace groups import
+names without that initialiser. Finding <code>google.service</code> does not imply that
+PyArchGraph owns every sibling under <code>google</code>.</p>
+</article>
+<article class="glossary-term" id="binding">
+<h3><a href="#binding">Binding</a></h3>
+<p>The association between an import name and a source file. A source can be
+<strong>bound</strong>, <strong>path-only</strong> (<code>path_only</code>), <strong>shadowed</strong> by a preferred package, or
+<strong>ambiguous</strong> because competing sources prevent a clear choice. Shadowed and
+path-only files still contribute imports that can be analysed.</p>
+</article>
+<article class="glossary-term" id="ownership">
+<h3><a href="#ownership">Ownership</a></h3>
+<p>The names treated as belonging to the analysed project. Selected source names,
+regular packages, and explicit <code>owned_prefixes</code> establish ownership; namespace
+ancestors alone do not. Ownership helps distinguish a missing internal target
+from an import outside the project.</p>
+</article>
+<article class="glossary-term" id="exclusion">
+<h3><a href="#exclusion">Exclusion</a></h3>
+<p>A file or directory intentionally omitted from collection. <code>ExcludedPath</code>
+records the path and the rule responsible. The application excludes tests by
+default; filesystem discovery also skips common generated and environment directories.</p>
+</article>
+<article class="glossary-term" id="target-declaration">
+<h3><a href="#target-declaration">Target declaration</a></h3>
+<p>A description of a target whose implementation is outside the analysed Python
+sources. <code>TargetDeclaration</code> can describe a stub, native implementation, generated
+module, or discovered exclusion. Declarations may come from discovery or explicit
+configuration; configuration supports stub, native, and generated targets.</p>
+</article>
+<article class="glossary-term" id="target-boundary">
+<h3><a href="#target-boundary">Target boundary</a></h3>
+<p>A recorded import of a declared target whose implementation was not analysed.
+<code>TargetBoundary</code> includes the declaration and evidence of its use. A declaration
+alone does not mean a boundary was encountered.</p>
+</article>
+<article class="glossary-term" id="acknowledgement">
+<h3><a href="#acknowledgement">Acknowledgement</a></h3>
+<p>Acceptance of a target boundary's missing implementation coverage. Configuration
+can grant it explicitly; ordinary exclusions receive it automatically.
+Acknowledgement remains visible in the report. It does not analyse the target,
+add dependencies through it, or excuse errors in selected source files.</p>
+</article>
+</section>
+<section class="content-section" id="import-observations-and-resolution">
+<h2>Import observations and resolution</h2>
+<article class="glossary-term" id="explicit-import">
+<h3><a href="#explicit-import">Explicit import</a></h3>
+<p>An <code>import</code> or <code>from ... import ...</code> statement visible in source code.
+<code>ImportSyntax</code> distinguishes the two forms. Calls such as
+<code>importlib.import_module(...)</code> are dynamic imports and are outside this analysis.</p>
+</article>
+<article class="glossary-term" id="import-site">
+<h3><a href="#import-site">Import site</a></h3>
+<p>The location of an import statement in a source file. One site can produce several
+facts: <code>import orders, inventory</code> contains two imported items.</p>
+</article>
+<article class="glossary-term" id="import-context">
+<h3><a href="#import-context">Import context</a></h3>
+<p>Where an import appears: for example, inside a function, a class body, a typing
+guard, or a conditional block. <code>ImportContext</code> records these observations so views
+can select imports. Context does not predict when code will execute.</p>
+</article>
+<article class="glossary-term" id="import-fact-draft">
+<h3><a href="#import-fact-draft">Import fact draft</a></h3>
+<p>One imported item observed in source code, before it receives a stable fact ID.
+<code>ImportFactDraft</code> holds its spelling, location, and context. Catalogue assembly
+first puts its source identity and path into the report's coordinate system.</p>
+</article>
+<article class="glossary-term" id="import-fact">
+<h3><a href="#import-fact">Import fact</a></h3>
+<p>A recorded imported item with a stable identity, location, and context.
+<code>ImportFact</code> describes what the source says; it does not by itself say what the
+import resolves to. “Source fact” in conversation refers to this import fact.</p>
+</article>
+<article class="glossary-term" id="canonicalisation">
+<h3><a href="#canonicalisation">Canonicalisation</a></h3>
+<p>Putting collected drafts into a consistent order and assigning content-derived
+fact IDs. <code>FactCanonicalizer</code> makes identical inputs produce identical identities.
+An edit to an identity field, including location, can change the ID.</p>
+</article>
+<article class="glossary-term" id="discovery-result-and-fact-collection">
+<h3><a href="#discovery-result-and-fact-collection">Discovery result and fact collection</a></h3>
+<p>The observations returned by the collection ports. <code>DiscoveryResult</code> contains
+inventoried sources, names, declarations, exclusions, and diagnostics.
+<code>FactCollection</code> contains import fact <strong>drafts</strong> and collection diagnostics.</p>
+</article>
+<article class="glossary-term" id="catalogue">
+<h3><a href="#catalogue">Catalogue</a></h3>
+<p>The application’s combined inventory for all selected roots. <code>SourceCatalog</code>
+brings together sources, final import facts, target declarations, exclusions, and
+diagnostics. <code>SourceCatalogBuilder</code> assembles it before import resolution.</p>
+</article>
+<article class="glossary-term" id="import-resolver">
+<h3><a href="#import-resolver">Import resolver</a></h3>
+<p>The service that interprets import facts against known source bindings, ownership,
+and target declarations. <code>ImportResolver</code> is its contract; <code>StaticImportResolver</code>
+is the built-in implementation. It does not import project code or inspect installed packages.</p>
+</article>
+<article class="glossary-term" id="resolution-result">
+<h3><a href="#resolution-result">Resolution result</a></h3>
+<p>The outcome of interpreting import facts: source dependencies, external imports,
+unresolved imports, encountered boundaries, and diagnostics. Represented by
+<code>ResolutionResult</code>.</p>
+</article>
+<article class="glossary-term" id="resolution-kind">
+<h3><a href="#resolution-kind">Resolution kind</a></h3>
+<p>How evidence links an import to a source. <code>ResolutionKind</code> distinguishes an exact
+module, an exact base in a <code>from</code> statement, and a probable submodule. A probable
+submodule may instead be a package attribute; static analysis cannot always decide.</p>
+</article>
+<article class="glossary-term" id="dependency">
+<h3><a href="#dependency">Dependency</a></h3>
+<p>A directed relationship from an importing source to an imported source, supported
+by import facts. <code>DependencyEdge</code> groups evidence for one source pair. Several
+facts can support the same dependency.</p>
+</article>
+<article class="glossary-term" id="evidence">
+<h3><a href="#evidence">Evidence</a></h3>
+<p>The connection from an analysis result back to the source statements supporting
+it. <code>DependencyEvidence</code> records a fact ID and resolution kind; <code>ViewEvidence</code>
+also preserves the original source endpoints when a view groups sources.</p>
+</article>
+<article class="glossary-term" id="evidence-location">
+<h3><a href="#evidence-location">Evidence location</a></h3>
+<p>A readable source reference attached to a result: path, position, statement text,
+and context. <code>EvidenceLocation</code> uses base-directory-relative paths and one-based
+character positions in reports.</p>
+</article>
+<article class="glossary-term" id="external-import">
+<h3><a href="#external-import">External import</a></h3>
+<p>An import classified outside the analysed source graph. <code>ExternalImport</code>
+distinguishes standard-library names from other external names. This classification
+does not establish that a dependency is installed or can be imported successfully.</p>
+</article>
+<article class="glossary-term" id="unresolved-import">
+<h3><a href="#unresolved-import">Unresolved import</a></h3>
+<p>An import the resolver cannot connect to a known source or declared target.
+<code>UnresolvedImport</code> records the reason, such as a missing internal
+target, ambiguous binding, or unknown package context. Checks decide which records
+become findings; coverage diagnostics can also report resolution problems.</p>
+</article>
+<article class="glossary-term" id="reconciliation">
+<h3><a href="#reconciliation">Reconciliation</a></h3>
+<p>Making separately collected information agree, or reporting conflicts.
+<code>BindingReconciler</code> checks bindings across roots; <code>TargetReconciler</code> combines
+discovered and configured target declarations and checks their package layout.</p>
+</article>
+</section>
+<section class="content-section" id="views-and-checks">
+<h2>Views and checks</h2>
+<article class="glossary-term" id="analysis-snapshot">
+<h3><a href="#analysis-snapshot">Analysis snapshot</a></h3>
+<p>The shared source analysis supplied to every view: sources, facts, selected
+dependencies, external imports, and unresolved imports. <code>AnalysisSnapshot</code> is
+prepared before views filter or group that information.</p>
+</article>
+<article class="glossary-term" id="view">
+<h3><a href="#view">View</a></h3>
+<p>A chosen perspective on the snapshot. A <code>GraphViewStrategy</code> produces a <code>ViewGraph</code>
+by selecting imports or grouping sources. Built-in views keep one node per source;
+extensions may group sources into larger units.</p>
+</article>
+<article class="glossary-term" id="structural-view">
+<h3><a href="#structural-view">Structural view</a></h3>
+<p>The built-in view retaining all explicit import facts. <code>StructuralView</code> is
+registered as <code>structural</code> and is the default gate.</p>
+</article>
+<article class="glossary-term" id="non-typing-view">
+<h3><a href="#non-typing-view">Non-typing view</a></h3>
+<p>The built-in view omitting imports inside recognised <code>TYPE_CHECKING</code> bodies.
+<code>NonTypingView</code> is registered as <code>non-typing</code>. Recognition is conservative;
+unrecognised or ambiguous conditions remain included.</p>
+</article>
+<article class="glossary-term" id="module-body-view">
+<h3><a href="#module-body-view">Module-body view</a></h3>
+<p>The built-in view omitting recognised typing-only imports and imports inside
+functions or methods. <code>ModuleBodyView</code> is registered as <code>module-body</code>; class bodies
+outside functions remain included. It filters syntax rather than simulating startup execution.</p>
+</article>
+<article class="glossary-term" id="projection">
+<h3><a href="#projection">Projection</a></h3>
+<p>Turning source dependencies into the nodes and edges of a view. A projection may
+filter evidence or combine sources, while preserving the original evidence behind
+each retained relationship. <code>SourceGraphProjection</code> builds the built-in source views.</p>
+</article>
+<article class="glossary-term" id="view-node-and-membership">
+<h3><a href="#view-node-and-membership">View node and membership</a></h3>
+<p>A node is one unit shown in a view. <code>ViewNode</code> has an ID, label, and member source
+IDs. Membership says which original sources that node represents; sources cannot
+belong to overlapping nodes in the same view.</p>
+</article>
+<article class="glossary-term" id="view-edge">
+<h3><a href="#view-edge">View edge</a></h3>
+<p>A directed relationship between two view nodes. <code>ViewEdge</code> retains evidence from
+the original source dependencies, even when its endpoints represent groups of files.</p>
+</article>
+<article class="glossary-term" id="cycle-and-cyclic-component">
+<h3><a href="#cycle-and-cyclic-component">Cycle and cyclic component</a></h3>
+<p>A cycle follows dependencies back to its starting node. A cyclic component is a
+group whose nodes can all reach one another, including a single node importing
+itself. A <code>CycleFinding</code> describes one such group, which may contain many cycles.</p>
+</article>
+<article class="glossary-term" id="witness">
+<h3><a href="#witness">Witness</a></h3>
+<p>One reproducibly chosen closed path demonstrating a cycle. The witness in a
+<code>CycleFinding</code> gives a manageable example with evidence; it does not enumerate
+every cycle or necessarily visit every member of the component.</p>
+</article>
+<article class="glossary-term" id="cycle-certainty">
+<h3><a href="#cycle-certainty">Cycle certainty</a></h3>
+<p><strong>Definite</strong> means the component contains a cycle supported by exact resolution;
+<code>definite_members</code> identifies nodes participating in such cycles. <strong>Possible</strong>
+means a cycle depends on probable resolution. Neither label predicts a runtime crash.</p>
+</article>
+<article class="glossary-term" id="check-and-check-context">
+<h3><a href="#check-and-check-context">Check and check context</a></h3>
+<p>A rule applied to a view. <code>CheckStrategy</code> receives a <code>CheckContext</code> containing the
+view, retained facts and imports, sources, and cycle analysis, then returns
+<code>CheckResult</code> values. Built-ins report cycles and unresolved imports.</p>
+</article>
+<article class="glossary-term" id="finding">
+<h3><a href="#finding">Finding</a></h3>
+<p>Something a check wants the user to review. A finding can describe a cycle
+(<code>CycleFinding</code>), an unresolved import (<code>ImportFinding</code>), or an extension's rule
+(<code>RuleFinding</code>). <code>CheckResult</code> pairs it with a severity; <code>RegisteredFinding</code> adds
+the responsible check's ID.</p>
+</article>
+<article class="glossary-term" id="diagnostic">
+<h3><a href="#diagnostic">Diagnostic</a></h3>
+<p>A message about collection, scope, resolution, or coverage, carried by
+<code>Diagnostic</code>. It belongs to coverage rather than an optional view check. A
+resolution problem may produce both a diagnostic and a finding.</p>
+</article>
+<article class="glossary-term" id="severity">
+<h3><a href="#severity">Severity</a></h3>
+<p>The importance of a diagnostic or finding: error, warning, or information.
+<code>Severity</code> supplies these labels. Error diagnostics affect completeness; error
+findings in the gate affect the CLI result when analysis is complete.</p>
+</article>
+</section>
+<section class="content-section" id="workflow-and-reports">
+<h2>Workflow and reports</h2>
+<article class="glossary-term" id="analysis-request-and-options">
+<h3><a href="#analysis-request-and-options">Analysis request and options</a></h3>
+<p>The input to one analysis. <code>AnalysisRequest</code> carries source roots, a base directory,
+and <code>AnalysisOptions</code>. Options choose exclusions, a gate, detail level, ownership
+prefixes, and target declarations. The application validates them before collection.</p>
+</article>
+<article class="glossary-term" id="project-observations">
+<h3><a href="#project-observations">Project observations</a></h3>
+<p>Location and packaging information obtained through <code>ProjectAccess</code>.
+<code>ProjectLocation</code> describes the base directory and roots; <code>ProjectMetadata</code>
+contains possible roots and package aliases; <code>DirectoryLocation</code> records a
+directory's location and whether it exists.</p>
+</article>
+<article class="glossary-term" id="strategy">
+<h3><a href="#strategy">Strategy</a></h3>
+<p>A replaceable way to build a view or perform a check. The domain defines the
+contracts; the application arranges when registered strategies run and validates
+their results.</p>
+</article>
+<article class="glossary-term" id="registration-and-registry">
+<h3><a href="#registration-and-registry">Registration and registry</a></h3>
+<p>A registration gives a strategy a name and, for checks, optional view applicability.
+<code>ViewRegistration</code> and <code>CheckRegistration</code> live in <code>StrategyRegistry</code>, which also
+records which checks are selected for each view. <code>StrategyEngine</code> runs them.</p>
+</article>
+<article class="glossary-term" id="coverage">
+<h3><a href="#coverage">Coverage</a></h3>
+<p>The account of what analysis examined and where its limits are. <code>Coverage</code>
+records roots, exclusions, analysed source count, diagnostics, target boundaries,
+and stated limitations. <code>CoveragePolicy</code> decides whether those limits allow a
+complete result.</p>
+</article>
+<article class="glossary-term" id="complete-and-incomplete">
+<h3><a href="#complete-and-incomplete">Complete and incomplete</a></h3>
+<p>An analysis is <strong>complete</strong> within its declared scope when there are no error
+diagnostics and every encountered target boundary is acknowledged. It can still
+contain error findings. <strong>Incomplete</strong> means coverage is insufficient; useful
+partial results may still be returned.</p>
+</article>
+<article class="glossary-term" id="view-report">
+<h3><a href="#view-report">View report</a></h3>
+<p>The completed result for one view: nodes, dependency and cycle counts, enabled
+checks, and registered findings. <code>ViewReport</code> is an application result, distinct
+from the intermediate <code>ViewGraph</code> used to run checks.</p>
+</article>
+<article class="glossary-term" id="analysis-report">
+<h3><a href="#analysis-report">Analysis report</a></h3>
+<p>The assembled result of one analysis. <code>AnalysisReport</code> includes completion status,
+sources, coverage, a gate, and the reports for all registered views. JSON is one
+presentation of this result, produced by an adapter.</p>
+</article>
+<article class="glossary-term" id="gate">
+<h3><a href="#gate">Gate</a></h3>
+<p>The view selected to determine the CLI's finding-based exit status. Other views
+remain in the report. Gate selection does not change coverage requirements.
+Available as <code>AnalysisReport.gate</code> and the <code>selected_view</code> convenience property.</p>
+</article>
+<article class="glossary-term" id="detail-level">
+<h3><a href="#detail-level">Detail level</a></h3>
+<p>How much cycle evidence is included. <code>summary</code> supplies a witness; <code>component-edges</code>
+also lists every dependency inside the cyclic component. The <code>Details</code> type names
+these choices. Neither option enumerates every elementary cycle.</p>
+</article>
+<article class="glossary-term" id="analysis-failure-and-extension-failure">
+<h3><a href="#analysis-failure-and-extension-failure">Analysis failure and extension failure</a></h3>
+<p><code>AnalysisError</code> describes an invalid analysis request or setup. <code>ExtensionError</code>
+describes a registered strategy failing or returning an invalid result. These
+prevent a report; source collection failures can instead produce a partial report.</p>
+</article>
+<article class="glossary-term" id="exit-code">
+<h3><a href="#exit-code">Exit code</a></h3>
+<p>The CLI's process result, chosen by <code>CliExitCodePolicy</code>: <strong>0</strong> for complete analysis
+with no gate error findings, <strong>1</strong> for complete analysis with gate error findings,
+and <strong>2</strong> for incomplete analysis. Invocation and extension failures also return
+2 through CLI error handling.</p>
+</article>
+</section>
+<section class="content-section" id="architecture-vocabulary">
+<h2>Architecture vocabulary</h2>
+<article class="glossary-term" id="domain">
+<h3><a href="#domain">Domain</a></h3>
+<p>The concepts and rules that give collected source information meaning: import
+resolution, dependencies, views, checks, and coverage policy. The <code>domain</code> package
+does not read files or depend on NetworkX.</p>
+</article>
+<article class="glossary-term" id="application-and-use-case">
+<h3><a href="#application-and-use-case">Application and use case</a></h3>
+<p>The application organises the work needed to answer a request. Its analysis use
+case, <code>AnalyseProject</code>, coordinates collection and domain rules, then assembles a
+report. The public analysis contract is <code>ProjectAnalyzer.analyse(request)</code>.</p>
+</article>
+<article class="glossary-term" id="port-and-protocol">
+<h3><a href="#port-and-protocol">Port and protocol</a></h3>
+<p>A port is a contract for a capability needed or offered by the core. Python
+<code>Protocol</code> classes describe these contracts. For example, the application needs
+<code>SourceDiscovery</code>, while the domain needs <code>GraphAlgorithms</code>.</p>
+</article>
+<article class="glossary-term" id="adapter">
+<h3><a href="#adapter">Adapter</a></h3>
+<p>A component connecting core contracts to a particular interface or technology.
+A <strong>driving</strong> adapter, such as the CLI, starts analysis. <strong>Driven</strong> adapters provide
+capabilities such as filesystem access, Python parsing, or NetworkX graph operations.</p>
+</article>
+<article class="glossary-term" id="syntax-tree">
+<h3><a href="#syntax-tree">Syntax tree</a></h3>
+<p>A structured description of Python source, often called an AST. <code>PythonAstParser</code>
+creates it; <code>ModuleImportExtractor</code> uses it to observe import statements and their
+context. Parsing does not execute the source.</p>
+</article>
+<article class="glossary-term" id="graph-algorithms-and-graph-handle">
+<h3><a href="#graph-algorithms-and-graph-handle">Graph algorithms and graph handle</a></h3>
+<p>The graph operations the domain needs to identify cyclic groups and obtain
+witnesses. <code>GraphAlgorithms</code> prepares a graph; <code>GraphHandle</code> provides queries on
+that prepared graph. The NetworkX adapter implements both contracts.</p>
+</article>
+<article class="glossary-term" id="composition-root">
+<h3><a href="#composition-root">Composition root</a></h3>
+<p>The place that chooses concrete implementations and connects them.
+<code>main.ApplicationFactory</code> supplies adapters and policies to the application.
+<code>__main__.main</code> is the small process entry point that starts the CLI.</p>
+</article>
+<article class="glossary-term" id="validation">
+<h3><a href="#validation">Validation</a></h3>
+<p>Checking that information satisfies the rules at the point where enough context
+is available. Request validation precedes collection; snapshot, view, and finding
+validation protect the shared analysis and extension boundaries.</p>
+</article>
+</section>
+<footer><span>PyArchGraph · Shared terminology</span><span><a href="domain.html">Domain</a> · <a href="application.html">Application</a> · <a href="adapters.html">Adapters</a> · <a href="#main">Back to top ↑</a></span></footer>
+</main></div>
+</body>
+</html>

@@ -6,6 +6,8 @@ from pyarchgraph.domain.graph_algorithms import GraphAlgorithms, GraphHandle
 
 
 class NetworkXGraphHandle(GraphHandle):
+    """Answer cycle queries for one prepared dependency graph using NetworkX."""
+
     def __init__(
         self, nodes: tuple[str, ...], edges: tuple[tuple[str, str], ...]
     ) -> None:
@@ -29,6 +31,8 @@ class NetworkXGraphHandle(GraphHandle):
 
 
 class NetworkXGraphAlgorithms(GraphAlgorithms):
+    """Prepare dependency graphs for cycle checks using NetworkX."""
+
     def prepare(
         self, nodes: tuple[str, ...], edges: tuple[tuple[str, str], ...]
     ) -> GraphHandle:

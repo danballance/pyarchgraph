@@ -29,7 +29,7 @@ from pyarchgraph.domain.models import (
 
 
 class GraphValidator:
-    """Validate support before a projection is consumed by any check."""
+    """Prepare original source evidence for validating views before checks run."""
 
     def prepare(self, snapshot: AnalysisSnapshot) -> _GraphValidationSession:
         """Build immutable provenance indexes once for this analysis only."""
@@ -46,6 +46,8 @@ class GraphValidator:
 
 @dataclass(frozen=True, slots=True)
 class _GraphValidationSession:
+    """Validate and order a view using one snapshot's source membership and evidence."""
+
     source_ids: frozenset[str]
     facts: Mapping[str, ImportFact]
     support: frozenset[tuple[str, str, str, ResolutionKind]]
@@ -166,6 +168,8 @@ class _GraphValidationSession:
 
 
 class SnapshotNormalizer:
+    """Order and deduplicate snapshot values before they are shared with views."""
+
     def normalize(self, snapshot: AnalysisSnapshot) -> AnalysisSnapshot:
         sources = tuple(sorted(snapshot.sources, key=self._id))
         facts = tuple(sorted(snapshot.facts, key=self._id))
@@ -255,7 +259,7 @@ class SnapshotNormalizer:
 
 
 class CheckResultValidator:
-    """Keep extension payloads within the immutable public report schema."""
+    """Validate immutable check results and their evidence against the analysed view."""
 
     def validate(self, results: tuple[CheckResult, ...], context: CheckContext) -> None:
         if type(results) is not tuple:

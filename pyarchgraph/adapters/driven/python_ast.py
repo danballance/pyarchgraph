@@ -25,25 +25,31 @@ _PHYSICAL_LINE = re.compile(r"(.*?(?:\r\n|\n|\r|$))")
 
 
 class SourceTextReader(Protocol):
+    """Provide Python source text for import collection."""
+
     def read(self, path: Path) -> str: ...
 
 
 class AstParser(Protocol):
+    """Provide the syntax tree used to collect imports from Python source."""
+
     def parse(self, source: str, filename: str) -> ast.Module: ...
 
 
 class ImportExtractor(Protocol):
+    """Describe explicit imports and their context as import fact drafts."""
+
     def extract(
         self, module: SourceModule, source: str, tree: ast.Module
     ) -> Iterable[ImportFactDraft]: ...
 
 
 class NonRegularSourceError(OSError):
-    """The input is not a regular source file."""
+    """Signal that an input cannot be read as a regular source file."""
 
 
 class SourceReader(SourceTextReader):
-    """Read decoded Python source, following only regular file symlinks."""
+    """Read Python source text, following only symlinks to regular files."""
 
     def read(self, path: Path) -> str:
         # Never open a FIFO or device, including inputs changed after discovery.
@@ -54,14 +60,17 @@ class SourceReader(SourceTextReader):
 
 
 class PythonAstParser(AstParser):
-    """Parse source without importing or executing it."""
+    """Expose Python syntax for import collection without executing the source."""
 
     def parse(self, source: str, filename: str) -> ast.Module:
         return ast.parse(source, filename=filename)
 
 
 class _SourceText:
-    """Cache physical UTF-8 lines once, without splitting Unicode separators."""
+    """Recover source excerpts and character columns for import fact drafts.
+
+    Physical UTF-8 lines stay intact, without splitting Unicode separators.
+    """
 
     def __init__(self, source: str) -> None:
         self.lines = tuple(
@@ -90,7 +99,7 @@ class _SourceText:
 
 
 class ModuleImportExtractor(ImportExtractor):
-    """Collect explicit import facts and their syntactic contexts."""
+    """Describe each explicit import and its context as an import fact draft."""
 
     def _typing_aliases(self, tree: ast.Module) -> tuple[set[str], set[str]]:
         """Recognize unambiguous module bindings, conservatively across the file.
@@ -268,7 +277,7 @@ class ModuleImportExtractor(ImportExtractor):
 
 
 class AstImportFactSource(ImportFactSource):
-    """Collect syntactic import facts without importing or executing code."""
+    """Collect import fact drafts and source diagnostics without executing code."""
 
     def __init__(
         self,

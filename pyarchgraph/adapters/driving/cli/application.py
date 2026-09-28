@@ -15,6 +15,8 @@ from pyarchgraph.domain.models import Severity
 
 
 class CliExitCodePolicy:
+    """Translate analysis completeness and gate findings into a CLI exit code."""
+
     def exit_code(self, report: AnalysisReport) -> int:
         return (
             2
@@ -29,6 +31,8 @@ class CliExitCodePolicy:
 
 
 class CliApplication:
+    """Run analysis from command-line choices and present the resulting report."""
+
     def __init__(
         self,
         analyzer: ProjectAnalyzer,

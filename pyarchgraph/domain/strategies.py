@@ -28,14 +28,20 @@ from pyarchgraph.domain.models import (
 
 
 class GraphViewStrategy(Protocol):
+    """Define how a shared analysis snapshot becomes a graph view."""
+
     def transform(self, snapshot: AnalysisSnapshot) -> ViewGraph: ...
 
 
 class CheckStrategy(Protocol):
+    """Define how a view is inspected to produce findings with severity."""
+
     def evaluate(self, context: CheckContext) -> tuple[CheckResult, ...]: ...
 
 
 class SourceGraphProjection:
+    """Build a view with one node per source and only the chosen import facts."""
+
     def project(
         self, snapshot: AnalysisSnapshot, fact_ids: frozenset[str]
     ) -> ViewGraph:
@@ -62,6 +68,8 @@ class SourceGraphProjection:
 
 
 class StructuralView(GraphViewStrategy):
+    """Include all explicit imports in a source graph view."""
+
     def transform(self, snapshot: AnalysisSnapshot) -> ViewGraph:
         return SourceGraphProjection().project(
             snapshot, frozenset(fact.id for fact in snapshot.facts)
@@ -69,6 +77,8 @@ class StructuralView(GraphViewStrategy):
 
 
 class NonTypingView(GraphViewStrategy):
+    """Build a source graph view without recognised typing-only imports."""
+
     def transform(self, snapshot: AnalysisSnapshot) -> ViewGraph:
         return SourceGraphProjection().project(
             snapshot,
@@ -79,6 +89,8 @@ class NonTypingView(GraphViewStrategy):
 
 
 class ModuleBodyView(GraphViewStrategy):
+    """Exclude recognised typing-only imports and those inside functions or methods."""
+
     def transform(self, snapshot: AnalysisSnapshot) -> ViewGraph:
         return SourceGraphProjection().project(
             snapshot,
@@ -91,6 +103,8 @@ class ModuleBodyView(GraphViewStrategy):
 
 
 class EvidenceInterpreter:
+    """Produce readable source evidence and remove repeated locations per dependency."""
+
     @staticmethod
     def location(
         fact: ImportFact,
@@ -143,7 +157,7 @@ class EvidenceInterpreter:
 
 
 class CycleAnalyzer:
-    """Own certainty, evidence, and stable bounded-witness selection policy."""
+    """Interpret cycle certainty and evidence, choosing one stable witness per group."""
 
     DEFINITE_KINDS = frozenset({ResolutionKind.EXACT_MODULE, ResolutionKind.EXACT_BASE})
 
@@ -252,6 +266,8 @@ class CycleAnalyzer:
 
 
 class CycleCheck(CheckStrategy):
+    """Report every analysed cycle group as an error finding."""
+
     def evaluate(self, context: CheckContext) -> tuple[CheckResult, ...]:
         return tuple(
             CheckResult(Severity.ERROR, finding) for finding in context.cycle_analysis
@@ -259,6 +275,8 @@ class CycleCheck(CheckStrategy):
 
 
 class UnresolvedImportCheck(CheckStrategy):
+    """Report unresolved imports as errors, except unmodelled namespace bases."""
+
     def evaluate(self, context: CheckContext) -> tuple[CheckResult, ...]:
         facts = {fact.id: fact for fact in context.facts}
         node_by_source = {

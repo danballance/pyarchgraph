@@ -13,7 +13,7 @@ _FACT_ID_PREFIX_LENGTH = 12
 
 
 class FactCanonicalizer:
-    """Assign stable, collision-safe identities to immutable import facts."""
+    """Turn drafts into ordered import facts with stable, collision-safe IDs."""
 
     def _context_identity(self, context: ImportContext) -> tuple[object, ...]:
         return (
