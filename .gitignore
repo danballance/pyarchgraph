@@ -11,3 +11,5 @@ benchmarks/*
 docs/validation/0.6/
 
 docs/validation/
+
+.idea/
